@@ -1,0 +1,44 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar class="bg-darkBg py-2 px-4 border-b border-glassBg shadow-neon-blue">
+    <ion-title class="text-neonBlue font-bold tracking-widest text-2xl font-sans">NEXUS</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="goToTopics()" class="text-neonPurple">
+        <ion-icon name="options-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="bg-darkBg">
+  <div class="p-4 bg-darkBg min-h-full pb-24">
+    
+    <!-- Topics Pill Menu -->
+    <div class="flex overflow-x-auto space-x-3 mb-6 pb-2 scrollbar-hide">
+      <div *ngFor="let t of topics" class="whitespace-nowrap px-4 py-1.5 rounded-full border border-neonBlue text-neonBlue bg-glassBg shadow-neon-blue text-sm uppercase tracking-wide">
+        {{ t }}
+      </div>
+    </div>
+
+    <!-- Feed -->
+    <div class="space-y-6">
+      <div *ngFor="let item of news" (click)="goToDetail(item.id)" class="relative group cursor-pointer">
+        <div class="absolute -inset-0.5 bg-gradient-to-r from-neonBlue to-neonPurple rounded-2xl blur opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+        <div class="relative bg-[#0d0d14] rounded-2xl p-4 overflow-hidden shadow-2xl border border-glassBg flex flex-col items-start h-full">
+          <div *ngIf="item.imageUrl" class="w-full h-40 mb-4 overflow-hidden rounded-xl border border-glassBg">
+            <img [src]="item.imageUrl" alt="News Image" class="w-full h-full object-cover transform transition duration-500 group-hover:scale-110">
+          </div>
+          <span class="text-xs font-semibold uppercase text-neonPink tracking-widest mb-2">{{ item.topic }}</span>
+          <h2 class="text-xl font-bold text-gray-100 leading-tight mb-3 group-hover:text-white">{{ item.title }}</h2>
+          <div class="mt-auto flex justify-between w-full text-xs text-gray-500 font-mono tracking-tight">
+            <span>{{ item.source }}</span>
+            <span>{{ item.time }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="news.length === 0" class="text-center text-gray-400 mt-20 font-mono text-sm">
+        No transmissions found for selected topics.
+      </div>
+    </div>
+  </div>
+</ion-content>
