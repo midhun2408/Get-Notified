@@ -1,10 +1,10 @@
-name: Hourly News Search
+name: Auto News Fetcher
 
 on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '*/7 * * * *' # Runs every 7 minutes
+    - cron: '*/10 * * * *' # Every 10 mins (more reliable for GitHub)
   workflow_dispatch: # Allows manual trigger
 
 jobs:
@@ -20,8 +20,8 @@ jobs:
           node-version: '18'
 
       - name: Install Dependencies
+        working-directory: scripts
         run: |
-          cd scripts
           npm init -y
           npm install firebase-admin axios
 
@@ -29,4 +29,6 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
-        run: node scripts/news-fetcher.js
+        run: |
+          cd scripts
+          node news-fetcher.js

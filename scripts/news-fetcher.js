@@ -44,8 +44,8 @@ async function runSearch() {
               title: article.title,
               description: article.description,
               url: article.url,
-              image: article.image,
-              publishedAt: article.publishedAt,
+              imageUrl: article.image,
+              time: article.publishedAt,
               source: article.source.name,
               timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
