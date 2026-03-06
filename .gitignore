@@ -3,6 +3,7 @@
 /tmp
 /out-tsc
 /bazel-out
+/.angular
 
 # Dependencies
 /node_modules
