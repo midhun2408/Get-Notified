@@ -1,6 +1,5 @@
-# GetNotified
-
-This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 16.2.16.
+# Get-Notified 🚀
+Futuristic AI-driven News Notifier with 100% Free Tier Background Searching via GitHub Actions.
 
 ## Development server
 
