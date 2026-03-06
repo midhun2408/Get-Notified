@@ -8,6 +8,7 @@ import { AppComponent } from './app.component';
 import { IonicModule } from '@ionic/angular';
 import { HomeComponent } from './home/home.component';
 import { TopicsComponent } from './topics/topics.component';
+import { NewsDetailComponent } from './news-detail/news-detail.component';
 
 import { provideFirebaseApp, initializeApp } from '@angular/fire/app';
 import { provideFirestore, getFirestore } from '@angular/fire/firestore';
@@ -26,7 +27,8 @@ const firebaseConfig = {
   declarations: [
     AppComponent,
     HomeComponent,
-    TopicsComponent
+    TopicsComponent,
+    NewsDetailComponent
   ],
   imports: [
     BrowserModule,
@@ -34,12 +36,11 @@ const firebaseConfig = {
     FormsModule,
     CommonModule,
     IonicModule.forRoot({}),
-  ],
-  providers: [
     provideFirebaseApp(() => initializeApp(firebaseConfig)),
     provideFirestore(() => getFirestore()),
     provideMessaging(() => getMessaging())
   ],
+  providers: [],
   bootstrap: [AppComponent]
 })
 export class AppModule { }
