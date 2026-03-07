@@ -1,15 +1,15 @@
 const admin = require('firebase-admin');
-const axios = require('axios');
+const Parser = require('rss-parser');
 
 // Initialize Firebase Admin using Service Account from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-const GNEWS_API_KEY = process.env.GNEWS_API_KEY;
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
 const db = admin.firestore();
+const parser = new Parser();
 
 async function runSearch() {
   console.log('--- Starting News Search ---');
@@ -29,31 +29,43 @@ async function runSearch() {
     await Promise.all(allTopics.map(async (topic) => {
       try {
         console.log(`Fetching news for: ${topic}`);
-        const response = await axios.get(`https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&token=${GNEWS_API_KEY}&lang=en&max=3`);
+        const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
+        const feed = await parser.parseURL(feedUrl);
         
-        const articles = response.data.articles || [];
+        const articles = feed.items.slice(0, 3);
+        if (!articles || articles.length === 0) return;
 
         // Process articles for this topic in parallel
         await Promise.all(articles.map(async (article) => {
-          const articleHash = Buffer.from(article.url).toString('base64');
+          if (!article.link || !article.title) return;
+
+          const articleHash = Buffer.from(article.link).toString('base64');
           const newsRef = db.collection('news').doc(articleHash);
           const doc = await newsRef.get();
 
           if (!doc.exists) {
-            console.log(`[${topic}] New article found: ${article.title}`);
+            let source = "Internet";
+            let cleanTitle = article.title;
+            const splitIndex = article.title.lastIndexOf(" - ");
+            if (splitIndex !== -1) {
+              source = article.title.substring(splitIndex + 3);
+              cleanTitle = article.title.substring(0, splitIndex);
+            }
+
+            console.log(`[${topic}] New article found: ${cleanTitle}`);
             await newsRef.set({
               topic,
-              title: article.title,
-              description: article.description,
-              url: article.url,
-              imageUrl: article.image,
-              time: article.publishedAt,
-              source: article.source.name,
+              title: cleanTitle,
+              description: article.contentSnippet || article.content || "",
+              url: article.link,
+              imageUrl: null,
+              time: article.pubDate || new Date().toISOString(),
+              source: source,
               timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
             // Trigger Push Notification
-            await sendNotification(topic, article.title);
+            await sendNotification(topic, cleanTitle);
           }
         }));
       } catch (error) {
