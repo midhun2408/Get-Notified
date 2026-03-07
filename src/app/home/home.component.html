@@ -17,8 +17,21 @@
     
     <!-- Topics Pill Menu -->
     <div class="flex overflow-x-auto space-x-3 mb-6 pb-2 scrollbar-hide">
-      <div *ngFor="let t of topics" class="whitespace-nowrap px-4 py-1.5 rounded-full border border-gray-300 dark:border-neonBlue text-gray-600 dark:text-neonBlue bg-white dark:bg-glassBg shadow-sm dark:shadow-neon-blue text-sm uppercase tracking-wide transition-all">
-        {{ t }}
+      <div *ngFor="let t of topics" 
+           (click)="toggleTopic(t.name)"
+           [class.bg-neonPink]="selectedTopics.has(t.name)"
+           [class.text-white]="selectedTopics.has(t.name)"
+           [class.dark:bg-neonPink]="selectedTopics.has(t.name)"
+           [class.dark:text-white]="selectedTopics.has(t.name)"
+           [class.shadow-neon-pink]="selectedTopics.has(t.name)"
+           [class.scale-105]="selectedTopics.has(t.name)"
+           [class.border-transparent]="selectedTopics.has(t.name)"
+           [class.bg-white]="!selectedTopics.has(t.name)"
+           [class.text-gray-600]="!selectedTopics.has(t.name)"
+           [class.dark:bg-glassBg]="!selectedTopics.has(t.name)"
+           [class.dark:text-neonBlue]="!selectedTopics.has(t.name)"
+           class="whitespace-nowrap px-4 py-1.5 rounded-full border border-gray-300 dark:border-neonBlue shadow-sm dark:shadow-neon-blue text-sm uppercase tracking-wide transition-all duration-300 cursor-pointer hover:shadow-lg active:scale-95">
+        {{ t.name }}
       </div>
     </div>
 

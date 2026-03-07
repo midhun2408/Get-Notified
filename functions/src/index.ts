@@ -3,7 +3,7 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import Parser from "rss-parser";
 import * as https from "https";
-import * as urlModule from "url";
+import * as zlib from "zlib";
 
 admin.initializeApp();
 
@@ -16,13 +16,24 @@ function decodeGoogleNewsUrl(encodedUrl: string): string {
     if (!url.hostname.includes('news.google.com')) return encodedUrl;
     
     const pathParts = url.pathname.split('/');
-    const base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
+    let base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
+    if (base64Str) base64Str = base64Str.split('?')[0];
     
-    if (base64Str && base64Str.startsWith('CBMi')) {
-      const buffer = Buffer.from(base64Str, 'base64');
-      const text = buffer.toString('binary');
-      const match = text.match(/https?:\/\/[^\s\x00-\x1f\x7f-\xff]*/);
-      if (match) return match[0];
+    if (!base64Str) return encodedUrl;
+
+    const normalized = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+    const buffer = Buffer.from(normalized, 'base64');
+    
+    const encodings = ['binary', 'utf8', 'ascii'] as const;
+    for (const enc of encodings) {
+      const text = buffer.toString(enc);
+      const matches = text.match(/https?:\/\/[^\s\x00-\x1f\x7f-\xff]*/g);
+      if (matches && matches.length > 0) {
+        const filtered = matches.filter(m => !m.includes('google.com'));
+        if (filtered.length > 0) {
+           return filtered.sort((a, b) => b.length - a.length)[0];
+        }
+      }
     }
   } catch (e) {
     // Fallback
@@ -45,6 +56,7 @@ function fetchWithRedirects(url: string, depth = 0): Promise<string | null> {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
         'Referer': 'https://www.google.com/',
@@ -63,7 +75,7 @@ function fetchWithRedirects(url: string, depth = 0): Promise<string | null> {
 
     https.get(url, options, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const nextUrl = urlModule.resolve(url, res.headers.location);
+        const nextUrl = new URL(res.headers.location, url).href;
         return resolve(fetchWithRedirects(nextUrl, depth + 1));
       }
 
@@ -72,9 +84,21 @@ function fetchWithRedirects(url: string, depth = 0): Promise<string | null> {
         return resolve(null);
       }
       
+      let stream: any = res;
+      const encoding = res.headers['content-encoding'];
+      if (encoding === 'gzip') {
+        stream = res.pipe(zlib.createGunzip());
+      } else if (encoding === 'deflate') {
+        stream = res.pipe(zlib.createInflate());
+      }
+
       let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(data));
+      stream.on('data', (chunk: any) => data += chunk);
+      stream.on('end', () => resolve(data));
+      stream.on('error', (e: any) => {
+        console.log(`[Cloud Function Enrichment] Stream error on ${url}: ${e.message}`);
+        resolve(null);
+      });
     }).on('error', (e) => {
       console.log(`[Cloud Function Enrichment] Error fetching ${url}: ${e.message}`);
       resolve(null);

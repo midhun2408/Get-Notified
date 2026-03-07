@@ -9,7 +9,7 @@ import { ThemeService } from '../services/theme.service';
   styleUrls: ['./topics.component.scss'],
 })
 export class TopicsComponent  implements OnInit {
-  topics: string[] = [];
+  topics: {id: string, name: string}[] = [];
   newTopic: string = '';
 
   constructor(
@@ -31,8 +31,8 @@ export class TopicsComponent  implements OnInit {
     }
   }
 
-  removeTopic(topic: string) {
-    this.newsService.removeTopic(topic);
+  removeTopic(id: string) {
+    this.newsService.removeTopic(id);
   }
 
   goBack() {

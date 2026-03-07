@@ -1,4 +1,4 @@
-package com.getnotified.app;
+package com.newsmate.app;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -16,6 +16,7 @@ module.exports = {
       boxShadow: {
         'neon-blue': '0 0 10px rgba(0, 243, 255, 0.5)',
         'neon-purple': '0 0 10px rgba(157, 0, 255, 0.5)',
+        'neon-pink': '0 0 10px rgba(255, 0, 170, 0.5)',
       }
     },
   },

@@ -20,10 +20,11 @@ export interface NewsItem {
 export class NewsService {
   constructor(private firestore: Firestore) {}
 
-  getTopics(): Observable<string[]> {
+  getTopics(): Observable<{id: string, name: string}[]> {
     const topicsRef = collection(this.firestore, 'topics');
-    return collectionData(topicsRef, { idField: 'id' }).pipe(
-      map(docs => docs.map((d: any) => d.name))
+    const q = query(topicsRef, orderBy('name'));
+    return collectionData(q, { idField: 'id' }).pipe(
+      map(docs => docs.map((d: any) => ({ id: d.id, name: d.name })))
     );
   }
 
@@ -32,9 +33,9 @@ export class NewsService {
     return addDoc(topicsRef, { name: topic });
   }
 
-  removeTopic(name: string) {
-    // Note: This logic assumes topic name is unique or you have its ID
-    // Simplification for the demo: search by name
+  removeTopic(id: string) {
+    const topicDocRef = doc(this.firestore, `topics/${id}`);
+    return deleteDoc(topicDocRef);
   }
 
   getNewsForTopics(topics: string[]): Observable<NewsItem[]> {
@@ -47,10 +48,14 @@ export class NewsService {
         ...item,
         timestamp: item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000) : item.timestamp
       }))),
-      map(news => news.sort((a, b) => {
+      map(news => news.slice().sort((a, b) => {
+        // Primary sort: Timestamp (Newest first)
         const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp || a.time).getTime();
         const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp || b.time).getTime();
-        return timeB - timeA;
+        if (timeA !== timeB) return timeB - timeA;
+        
+        // Secondary sort: Topic (A-Z) - Case-insensitive and robust
+        return a.topic.localeCompare(b.topic, undefined, { sensitivity: 'base' });
       }))
     );
   }
