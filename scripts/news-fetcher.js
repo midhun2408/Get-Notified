@@ -17,39 +17,40 @@ const urlModule = require('url');
 /**
  * Decodes Google News direct links from CBMi base64 pattern
  */
-function decodeGoogleNewsUrl(encodedUrl) {
+function decodeArticleUrl(encodedUrl) {
   try {
     const url = new URL(encodedUrl);
-    if (!url.hostname.includes('news.google.com')) return encodedUrl;
     
-    const pathParts = url.pathname.split('/');
-    let base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
-    if (base64Str) base64Str = base64Str.split('?')[0];
-    
-    if (!base64Str) return encodedUrl;
+    // Handle Bing News RSS URLs
+    if (url.hostname.includes('bing.com')) {
+      const realUrl = url.searchParams.get('url');
+      if (realUrl) return realUrl;
+    }
 
-    // Google sometimes uses URL-safe base64, Node handle this partially but let's be safe
-    const normalized = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-    const buffer = Buffer.from(normalized, 'base64');
-    
-    // Look for URLs in binary, utf8, and ascii representations
-    const encodings = ['binary', 'utf8', 'ascii'];
-    for (const enc of encodings) {
-      const text = buffer.toString(enc);
-      // More aggressive regex to find the actual article URL
-      // Google News strings often contain multiple URLs, the last long one is usually the article
-      const matches = text.match(/https?:\/\/[^\s\x00-\x1f\x7f-\xff]*/g);
-      if (matches && matches.length > 0) {
-        // Find the longest URL that doesn't point back to google
-        const filtered = matches.filter(m => !m.includes('google.com'));
-        if (filtered.length > 0) {
-           return filtered.sort((a, b) => b.length - a.length)[0];
+    // Handle Google News RSS URLs
+    if (url.hostname.includes('news.google.com')) {
+      const pathParts = url.pathname.split('/');
+      let base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
+      if (base64Str) base64Str = base64Str.split('?')[0];
+      
+      if (!base64Str) return encodedUrl;
+
+      const normalized = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+      const buffer = Buffer.from(normalized, 'base64');
+      
+      const encodings = ['binary', 'utf8', 'ascii'];
+      for (const enc of encodings) {
+        const text = buffer.toString(enc);
+        const matches = text.match(/https?:\/\/[^\s\x00-\x1f\x7f-\xff]*/g);
+        if (matches && matches.length > 0) {
+          const filtered = matches.filter(m => !m.includes('google.com'));
+          if (filtered.length > 0) {
+            return filtered.sort((a, b) => b.length - a.length)[0];
+          }
         }
       }
     }
-  } catch (e) {
-    // Fallback
-  }
+  } catch (e) { }
   return encodedUrl;
 }
 
@@ -126,7 +127,7 @@ function fetchWithRedirects(url, depth = 0) {
 async function fetchArticleData(url) {
   try {
     // 1. Decode Google News URL if needed
-    const realUrl = decodeGoogleNewsUrl(url);
+    const realUrl = decodeArticleUrl(url);
     if (realUrl !== url) {
         console.log(`[Enrichment] Decoded Google link: ${realUrl}`);
     }
@@ -154,6 +155,8 @@ async function fetchArticleData(url) {
                    !p.includes('{') && 
                    !p.toLowerCase().includes('subscribe') && 
                    !p.toLowerCase().includes('sign in') &&
+                   !p.toLowerCase().includes('weather') &&
+                   !p.toLowerCase().includes('epaper') &&
                    !p.toLowerCase().includes('copyright');
         });
 
@@ -230,13 +233,13 @@ async function runSearch() {
                 }
             }
         } else {
-            console.log(`No direct feed for ${topic}, falling back to Google News`);
-            const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
+            console.log(`No direct feed for ${topic}, falling back to Bing News RSS`);
+            const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
             try {
                 const feed = await parser.parseURL(feedUrl);
                 items = feed.items.slice(0, 5);
             } catch (e) {
-                console.error(`Error fetching Google News for ${topic}:`, e.message);
+                console.error(`Error fetching Bing News for ${topic}:`, e.message);
             }
         }
 
