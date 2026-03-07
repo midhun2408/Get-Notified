@@ -42,41 +42,82 @@ const v2_1 = require("firebase-functions/v2");
 const admin = __importStar(require("firebase-admin"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
 const https = __importStar(require("https"));
-admin.initializeApp();
 const urlModule = __importStar(require("url"));
+admin.initializeApp();
+function decodeGoogleNewsUrl(encodedUrl) {
+    try {
+        const url = new URL(encodedUrl);
+        if (!url.hostname.includes('news.google.com'))
+            return encodedUrl;
+        const pathParts = url.pathname.split('/');
+        const base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
+        if (base64Str && base64Str.startsWith('CBMi')) {
+            const buffer = Buffer.from(base64Str, 'base64');
+            const text = buffer.toString('binary');
+            const match = text.match(/https?:\/\/[^\s\x00-\x1f\x7f-\xff]*/);
+            if (match)
+                return match[0];
+        }
+    }
+    catch (e) {
+    }
+    return encodedUrl;
+}
 function fetchWithRedirects(url, depth = 0) {
     return new Promise((resolve) => {
         if (depth > 5)
             return resolve(null);
+        const parsedUrl = new URL(url);
         const options = {
+            hostname: parsedUrl.hostname,
+            path: parsedUrl.pathname + parsedUrl.search,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Referer': 'https://www.google.com/',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'cross-site',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
                 'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
             },
-            timeout: 8000
+            timeout: 10000
         };
         https.get(url, options, (res) => {
             if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                 const nextUrl = urlModule.resolve(url, res.headers.location);
                 return resolve(fetchWithRedirects(nextUrl, depth + 1));
             }
-            if (res.statusCode !== 200)
+            if (res.statusCode !== 200) {
+                console.log(`[Cloud Function Enrichment] Failed to fetch ${url} - Status: ${res.statusCode}`);
                 return resolve(null);
+            }
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => resolve(data));
-        }).on('error', () => resolve(null));
+        }).on('error', (e) => {
+            console.log(`[Cloud Function Enrichment] Error fetching ${url}: ${e.message}`);
+            resolve(null);
+        });
     });
 }
 async function fetchArticleData(url) {
     try {
-        let html = await fetchWithRedirects(url);
+        const realUrl = decodeGoogleNewsUrl(url);
+        let html = await fetchWithRedirects(realUrl);
         if (!html)
             return { description: null, imageUrl: null };
         const googleMatch = html.match(/<a[^>]*rel="nofollow"[^>]*href="([^"]*)"/i);
         if (googleMatch) {
-            const realUrl = googleMatch[1];
-            html = await fetchWithRedirects(realUrl);
+            const intermediateUrl = googleMatch[1];
+            html = await fetchWithRedirects(intermediateUrl);
             if (!html)
                 return { description: null, imageUrl: null };
         }
@@ -84,15 +125,24 @@ async function fetchArticleData(url) {
         let description = null;
         if (paragraphs) {
             const cleanParagraphs = paragraphs
-                .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
-                .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+                .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').trim())
+                .filter(p => {
+                return p.length > 120 &&
+                    !p.includes('{') &&
+                    !p.toLowerCase().includes('subscribe') &&
+                    !p.toLowerCase().includes('sign in') &&
+                    !p.toLowerCase().includes('copyright');
+            });
             if (cleanParagraphs.length > 0) {
                 description = cleanParagraphs.slice(0, 4).join('\n\n');
             }
         }
         const ogImageMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
         const twitterImageMatch = html.match(/<meta[^>]*name="twitter:image"[^>]*content="([^"]*)"/i);
-        const imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
+        let imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
+        if (imageUrl && (imageUrl.includes('googleusercontent.com') || imageUrl.includes('gstatic.com') || imageUrl.includes('google.com/news'))) {
+            imageUrl = null;
+        }
         return { description, imageUrl };
     }
     catch (e) {
@@ -194,13 +244,23 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                         if (description.includes("Comprehensive up-to-date")) {
                             description = displayTitle;
                         }
-                        console.log(`[${topic}] Fetching article data for: ${displayTitle}`);
+                        console.log(`[${topic}] Processing story: ${displayTitle}`);
+                        let imageUrl = null;
+                        const content = article.content || article.contentSnippet || "";
+                        if (content) {
+                            const imgMatch = content.match(/<img[^>]*src="([^"]*)"/i);
+                            if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
+                                imageUrl = imgMatch[1];
+                            }
+                        }
                         const articleData = await fetchArticleData(article.link);
                         if (articleData.description) {
                             description = articleData.description;
                         }
-                        const imageUrl = articleData.imageUrl;
-                        console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
+                        if (articleData.imageUrl) {
+                            imageUrl = articleData.imageUrl;
+                        }
+                        console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
                         await newsRef.set({
                             topic,
                             title: displayTitle,
@@ -212,6 +272,7 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                             timestamp: admin.firestore.FieldValue.serverTimestamp()
                         });
                         await sendNotification(topic, displayTitle);
+                        await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
                     }
                 }
             }
