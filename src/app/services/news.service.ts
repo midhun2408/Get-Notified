@@ -30,9 +30,7 @@ export class NewsService {
 
   async addTopic(topic: string) {
     const topicsRef = collection(this.firestore, 'topics');
-    const docRef = await addDoc(topicsRef, { name: topic });
-    this.triggerGitHubAction();
-    return docRef;
+    return await addDoc(topicsRef, { name: topic });
   }
 
   async removeTopic(id: string, name: string) {
@@ -51,12 +49,6 @@ export class NewsService {
     // 2. Delete topic
     const topicDocRef = doc(this.firestore, `topics/${id}`);
     return deleteDoc(topicDocRef);
-  }
-
-  private triggerGitHubAction() {
-    console.log('GitHub Action trigger requested. (Note: Secure dispatch requires a backend or proxy to avoid exposing PAT)');
-    // TODO: If you have a secure endpoint to trigger the action, call it here.
-    // For now, the scheduled run (every 15m) will pick it up.
   }
 
   getNewsForTopics(topics: string[]): Observable<NewsItem[]> {

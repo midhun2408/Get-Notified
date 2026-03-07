@@ -1,13 +1,34 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
-import * as admin from "firebase-admin";
-import Parser from "rss-parser";
 import * as https from "https";
 import * as zlib from "zlib";
 import * as crypto from "crypto";
 
-admin.initializeApp();
+let _admin: any;
+function getAdmin() {
+  if (!_admin) _admin = require("firebase-admin");
+  return _admin;
+}
+
+let _db: any;
+function getDb() {
+  if (!_db) {
+    const admin = getAdmin();
+    if (admin.apps.length === 0) admin.initializeApp();
+    _db = admin.firestore();
+  }
+  return _db;
+}
+
+let _parser: any;
+function getParser() {
+  if (!_parser) {
+    const Parser = require("rss-parser");
+    _parser = new Parser();
+  }
+  return _parser;
+}
 
 /**
  * Decodes Google News direct links from CBMi base64 pattern
@@ -174,9 +195,6 @@ async function fetchArticleData(url: string): Promise<{ description: string | nu
 // Set global options for all v2 functions
 setGlobalOptions({ maxInstances: 10, region: "us-central1" });
 
-const db = admin.firestore();
-const parser = new Parser();
-
 // Map common topics to high-quality direct publisher feeds
 const TOPIC_FEEDS: { [key: string]: string[] } = {
   'Kerala': [
@@ -201,6 +219,8 @@ const TOPIC_FEEDS: { [key: string]: string[] } = {
  */
 async function processTopic(topic: string) {
   try {
+    const db = getDb();
+    const parser = getParser();
     console.log(`--- Processing topic: ${topic} ---`);
     let items: any[] = [];
     
@@ -279,6 +299,7 @@ async function processTopic(topic: string) {
 
         console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
         
+        const admin = getAdmin();
         await newsRef.set({
           topic,
           title: displayTitle,
@@ -306,8 +327,9 @@ export const searchNewsAI = onSchedule({
   memory: "512MiB",
 }, async (event) => {
   try {
+    const db = getDb();
     const topicsSnapshot = await db.collection("topics").get();
-    const allTopics = topicsSnapshot.docs.map(doc => doc.data().name);
+    const allTopics = topicsSnapshot.docs.map((doc: any) => doc.data().name);
 
     if (allTopics.length === 0) {
       console.log("No topics found in Firestore.");
@@ -345,6 +367,7 @@ export const onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event
   const topicName = data.name;
   console.log(`[Trigger] Topic deleted: ${topicName}. Cleaning up news...`);
   
+  const db = getDb();
   const newsRef = db.collection("news");
   const q = newsRef.where("topic", "==", topicName);
   const snapshot = await q.get();
@@ -352,12 +375,15 @@ export const onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event
   if (snapshot.empty) return;
   
   const batch = db.batch();
-  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
   await batch.commit();
   console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
 
 async function sendNotification(topic: string, title: string) {
+  const admin = getAdmin();
+  if (admin.apps.length === 0) admin.initializeApp();
+  
   const payload = {
     notification: {
       title: `Match found for: ${topic}`,
