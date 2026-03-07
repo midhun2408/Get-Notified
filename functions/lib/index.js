@@ -41,6 +41,8 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const v2_1 = require("firebase-functions/v2");
 const admin = __importStar(require("firebase-admin"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
+const axios_1 = __importDefault(require("axios"));
+const cheerio = __importStar(require("cheerio"));
 admin.initializeApp();
 (0, v2_1.setGlobalOptions)({ maxInstances: 10 });
 const db = admin.firestore();
@@ -79,10 +81,24 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                             source = article.title.substring(splitIndex + 3);
                             cleanTitle = article.title.substring(0, splitIndex);
                         }
+                        let description = article.contentSnippet || article.content || "";
+                        if (!description || description.includes(cleanTitle)) {
+                            try {
+                                const articleHtml = await axios_1.default.get(article.link, { timeout: 5000 });
+                                const $ = cheerio.load(articleHtml.data);
+                                description = $('meta[property="og:description"]').attr('content') ||
+                                    $('meta[name="description"]').attr('content') ||
+                                    cleanTitle;
+                            }
+                            catch (e) {
+                                console.log(`Could not scrape description for ${cleanTitle}`);
+                                description = cleanTitle;
+                            }
+                        }
                         await newsRef.set({
                             topic,
                             title: cleanTitle,
-                            description: article.contentSnippet || article.content || "",
+                            description: description,
                             url: article.link,
                             image: null,
                             publishedAt: article.pubDate || new Date().toISOString(),

@@ -2,6 +2,8 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import Parser from "rss-parser";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
 admin.initializeApp();
 
@@ -58,10 +60,25 @@ export const searchNewsAI = onSchedule({
               cleanTitle = article.title.substring(0, splitIndex);
             }
 
+            // Google News RSS returns just the title in the description
+            let description = article.contentSnippet || article.content || "";
+            if (!description || description.includes(cleanTitle)) {
+               try {
+                 const articleHtml = await axios.get(article.link, { timeout: 5000 });
+                 const $ = cheerio.load(articleHtml.data);
+                 description = $('meta[property="og:description"]').attr('content') || 
+                               $('meta[name="description"]').attr('content') || 
+                               cleanTitle;
+               } catch(e) {
+                 console.log(`Could not scrape description for ${cleanTitle}`);
+                 description = cleanTitle; // fallback
+               }
+            }
+
             await newsRef.set({
               topic,
               title: cleanTitle,
-              description: article.contentSnippet || article.content || "",
+              description: description,
               url: article.link,
               image: null, // RSS rarely provides a clean image, UI should handle this
               publishedAt: article.pubDate || new Date().toISOString(),

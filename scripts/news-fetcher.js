@@ -1,5 +1,7 @@
 const admin = require('firebase-admin');
 const Parser = require('rss-parser');
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 // Initialize Firebase Admin using Service Account from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -52,11 +54,26 @@ async function runSearch() {
               cleanTitle = article.title.substring(0, splitIndex);
             }
 
+            // Google News RSS often returns just the title in the description
+            let description = article.contentSnippet || article.content || "";
+            if (!description || description.includes(cleanTitle)) {
+               try {
+                 const articleHtml = await axios.get(article.link, { timeout: 5000 });
+                 const $ = cheerio.load(articleHtml.data);
+                 description = $('meta[property="og:description"]').attr('content') || 
+                               $('meta[name="description"]').attr('content') || 
+                               cleanTitle;
+               } catch(e) {
+                 console.log(`Could not scrape description for ${cleanTitle}`);
+                 description = cleanTitle; // fallback
+               }
+            }
+
             console.log(`[${topic}] New article found: ${cleanTitle}`);
             await newsRef.set({
               topic,
               title: cleanTitle,
-              description: article.contentSnippet || article.content || "",
+              description: description,
               url: article.link,
               imageUrl: null,
               time: article.pubDate || new Date().toISOString(),
