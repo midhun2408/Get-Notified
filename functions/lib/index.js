@@ -41,7 +41,45 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const v2_1 = require("firebase-functions/v2");
 const admin = __importStar(require("firebase-admin"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
+const https = __importStar(require("https"));
 admin.initializeApp();
+function fetchFullDescription(url) {
+    return new Promise((resolve) => {
+        const options = {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+            },
+            timeout: 5000
+        };
+        https.get(url, options, (res) => {
+            if (res.statusCode !== 200)
+                return resolve(null);
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+                    if (!paragraphs)
+                        return resolve(null);
+                    const cleanParagraphs = paragraphs
+                        .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+                        .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+                    if (cleanParagraphs.length > 0) {
+                        resolve(cleanParagraphs.slice(0, 4).join('\n\n'));
+                    }
+                    else {
+                        resolve(null);
+                    }
+                }
+                catch (e) {
+                    resolve(null);
+                }
+            });
+        }).on('error', () => {
+            resolve(null);
+        });
+    });
+}
 (0, v2_1.setGlobalOptions)({ maxInstances: 10 });
 const db = admin.firestore();
 const parser = new rss_parser_1.default();
@@ -136,6 +174,11 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                         }
                         if (description.includes("Comprehensive up-to-date")) {
                             description = displayTitle;
+                        }
+                        console.log(`[${topic}] Fetching full content for: ${displayTitle}`);
+                        const fullDesc = await fetchFullDescription(article.link);
+                        if (fullDesc) {
+                            description = fullDesc;
                         }
                         console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
                         await newsRef.set({

@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const Parser = require('rss-parser');
+const https = require('https');
 
 // Initialize Firebase Admin using Service Account from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -10,6 +11,50 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const parser = new Parser();
+
+/**
+ * Fetches the actual article page and extracts the first few paragraphs
+ * for a more detailed summary (bypass Node 18 ReferenceError by using native https)
+ */
+function fetchFullDescription(url) {
+  return new Promise((resolve) => {
+    const options = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+      },
+      timeout: 5000
+    };
+
+    https.get(url, options, (res) => {
+      if (res.statusCode !== 200) return resolve(null);
+      
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Extract text from <p> tags using regex to avoid cheerio Node 18 issues
+          const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+          if (!paragraphs) return resolve(null);
+
+          const cleanParagraphs = paragraphs
+            .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+            .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+
+          if (cleanParagraphs.length > 0) {
+            // Join first 3-4 paragraphs to get around 7-10 lines of text
+            resolve(cleanParagraphs.slice(0, 4).join('\n\n'));
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    }).on('error', () => {
+      resolve(null);
+    });
+  });
+}
 
 async function runSearch() {
   console.log('--- Starting News Search ---');
@@ -116,6 +161,13 @@ async function runSearch() {
             // Ensure description isn't just a generic Google redirect string
             if (description.includes("Comprehensive up-to-date")) {
                 description = displayTitle; 
+            }
+
+            // ENRICHMENT: Fetch longer description for new articles
+            console.log(`[${topic}] Fetching full content for: ${displayTitle}`);
+            const fullDesc = await fetchFullDescription(article.link);
+            if (fullDesc) {
+                description = fullDesc;
             }
 
             console.log(`[${topic}] New article found: ${displayTitle} (${source})`);

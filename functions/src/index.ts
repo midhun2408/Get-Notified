@@ -2,8 +2,53 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import Parser from "rss-parser";
+import * as https from "https";
 
 admin.initializeApp();
+
+/**
+ * Fetches the actual article page and extracts the first few paragraphs
+ * for a more detailed summary (bypass Node 18 ReferenceError by using native https)
+ */
+function fetchFullDescription(url: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const options = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+      },
+      timeout: 5000
+    };
+
+    https.get(url, options, (res) => {
+      if (res.statusCode !== 200) return resolve(null);
+      
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Extract text from <p> tags using regex
+          const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+          if (!paragraphs) return resolve(null);
+
+          const cleanParagraphs = paragraphs
+            .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+            .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+
+          if (cleanParagraphs.length > 0) {
+            // Join first 3-4 paragraphs
+            resolve(cleanParagraphs.slice(0, 4).join('\n\n'));
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    }).on('error', () => {
+      resolve(null);
+    });
+  });
+}
 
 // Set global options for all v2 functions
 setGlobalOptions({ maxInstances: 10 });
@@ -109,6 +154,13 @@ export const searchNewsAI = onSchedule({
 
             if (description.includes("Comprehensive up-to-date")) {
                 description = displayTitle; 
+            }
+
+            // ENRICHMENT: Fetch longer description for new articles
+            console.log(`[${topic}] Fetching full content for: ${displayTitle}`);
+            const fullDesc = await fetchFullDescription(article.link);
+            if (fullDesc) {
+                description = fullDesc;
             }
 
             console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
