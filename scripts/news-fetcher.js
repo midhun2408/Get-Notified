@@ -13,10 +13,10 @@ const db = admin.firestore();
 const parser = new Parser();
 
 /**
- * Fetches the actual article page and extracts the first few paragraphs
+ * Fetches the actual article page and extracts the first few paragraphs and the lead image
  * for a more detailed summary (bypass Node 18 ReferenceError by using native https)
  */
-function fetchFullDescription(url) {
+function fetchArticleData(url) {
   return new Promise((resolve) => {
     const options = {
       headers: {
@@ -26,32 +26,37 @@ function fetchFullDescription(url) {
     };
 
     https.get(url, options, (res) => {
-      if (res.statusCode !== 200) return resolve(null);
+      if (res.statusCode !== 200) return resolve({ description: null, imageUrl: null });
       
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
-          // Extract text from <p> tags using regex to avoid cheerio Node 18 issues
+          // Extract text from <p> tags
           const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
-          if (!paragraphs) return resolve(null);
+          let description = null;
+          if (paragraphs) {
+            const cleanParagraphs = paragraphs
+              .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+              .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
 
-          const cleanParagraphs = paragraphs
-            .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
-            .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
-
-          if (cleanParagraphs.length > 0) {
-            // Join first 3-4 paragraphs to get around 7-10 lines of text
-            resolve(cleanParagraphs.slice(0, 4).join('\n\n'));
-          } else {
-            resolve(null);
+            if (cleanParagraphs.length > 0) {
+              description = cleanParagraphs.slice(0, 4).join('\n\n');
+            }
           }
+
+          // Extract og:image
+          const ogImageMatch = data.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
+          const twitterImageMatch = data.match(/<meta[^>]*name="twitter:image"[^>]*content="([^"]*)"/i);
+          const imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
+
+          resolve({ description, imageUrl });
         } catch (e) {
-          resolve(null);
+          resolve({ description: null, imageUrl: null });
         }
       });
     }).on('error', () => {
-      resolve(null);
+      resolve({ description: null, imageUrl: null });
     });
   });
 }
@@ -163,12 +168,13 @@ async function runSearch() {
                 description = displayTitle; 
             }
 
-            // ENRICHMENT: Fetch longer description for new articles
-            console.log(`[${topic}] Fetching full content for: ${displayTitle}`);
-            const fullDesc = await fetchFullDescription(article.link);
-            if (fullDesc) {
-                description = fullDesc;
+            // ENRICHMENT: Fetch longer description and lead image for new articles
+            console.log(`[${topic}] Fetching article data for: ${displayTitle}`);
+            const articleData = await fetchArticleData(article.link);
+            if (articleData.description) {
+                description = articleData.description;
             }
+            const imageUrl = articleData.imageUrl;
 
             console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
             
@@ -177,7 +183,7 @@ async function runSearch() {
               title: displayTitle,
               description: description,
               url: article.link,
-              imageUrl: null,
+              imageUrl: imageUrl,
               time: article.pubDate || new Date().toISOString(),
               source: source,
               timestamp: admin.firestore.FieldValue.serverTimestamp()

@@ -17,8 +17,8 @@
 <ion-content style="--background: transparent; --color: inherit;" class="bg-gray-50 dark:bg-darkBg transition-all duration-300">
   <div *ngIf="newsItem$ | async as item; else loading" class="relative min-h-full">
     <!-- Hero Image -->
-    <div *ngIf="item.image" class="w-full h-72 relative">
-      <img [src]="item.image" class="w-full h-full object-cover">
+    <div *ngIf="item.imageUrl" class="w-full h-72 relative">
+      <img [src]="item.imageUrl" class="w-full h-full object-cover">
       <div class="absolute inset-0 bg-gradient-to-t from-gray-50 dark:from-darkBg to-transparent opacity-80"></div>
     </div>
 
