@@ -32,20 +32,38 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onTopicDeleted = exports.onTopicCreated = exports.searchNewsAI = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const v2_1 = require("firebase-functions/v2");
-const admin = __importStar(require("firebase-admin"));
-const rss_parser_1 = __importDefault(require("rss-parser"));
 const https = __importStar(require("https"));
 const zlib = __importStar(require("zlib"));
 const crypto = __importStar(require("crypto"));
-admin.initializeApp();
+let _admin;
+function getAdmin() {
+    if (!_admin)
+        _admin = require("firebase-admin");
+    return _admin;
+}
+let _db;
+function getDb() {
+    if (!_db) {
+        const admin = getAdmin();
+        if (admin.apps.length === 0)
+            admin.initializeApp();
+        _db = admin.firestore();
+    }
+    return _db;
+}
+let _parser;
+function getParser() {
+    if (!_parser) {
+        const Parser = require("rss-parser");
+        _parser = new Parser();
+    }
+    return _parser;
+}
 function decodeArticleUrl(encodedUrl) {
     try {
         const url = new URL(encodedUrl);
@@ -181,8 +199,6 @@ async function fetchArticleData(url) {
     }
 }
 (0, v2_1.setGlobalOptions)({ maxInstances: 10, region: "us-central1" });
-const db = admin.firestore();
-const parser = new rss_parser_1.default();
 const TOPIC_FEEDS = {
     'Kerala': [
         'https://www.thehindu.com/news/national/kerala/feeder/default.rss',
@@ -202,6 +218,8 @@ const TOPIC_FEEDS = {
 };
 async function processTopic(topic) {
     try {
+        const db = getDb();
+        const parser = getParser();
         console.log(`--- Processing topic: ${topic} ---`);
         let items = [];
         if (TOPIC_FEEDS[topic]) {
@@ -276,6 +294,7 @@ async function processTopic(topic) {
                 if (articleData.imageUrl)
                     imageUrl = articleData.imageUrl;
                 console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
+                const admin = getAdmin();
                 await newsRef.set({
                     topic,
                     title: displayTitle,
@@ -301,8 +320,9 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
     memory: "512MiB",
 }, async (event) => {
     try {
+        const db = getDb();
         const topicsSnapshot = await db.collection("topics").get();
-        const allTopics = topicsSnapshot.docs.map(doc => doc.data().name);
+        const allTopics = topicsSnapshot.docs.map((doc) => doc.data().name);
         if (allTopics.length === 0) {
             console.log("No topics found in Firestore.");
             return;
@@ -332,17 +352,21 @@ exports.onTopicDeleted = (0, firestore_1.onDocumentDeleted)("topics/{topicId}", 
         return;
     const topicName = data.name;
     console.log(`[Trigger] Topic deleted: ${topicName}. Cleaning up news...`);
+    const db = getDb();
     const newsRef = db.collection("news");
     const q = newsRef.where("topic", "==", topicName);
     const snapshot = await q.get();
     if (snapshot.empty)
         return;
     const batch = db.batch();
-    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
     console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
 async function sendNotification(topic, title) {
+    const admin = getAdmin();
+    if (admin.apps.length === 0)
+        admin.initializeApp();
     const payload = {
         notification: {
             title: `Match found for: ${topic}`,
