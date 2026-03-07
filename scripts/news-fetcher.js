@@ -12,53 +12,79 @@ admin.initializeApp({
 const db = admin.firestore();
 const parser = new Parser();
 
+const urlModule = require('url');
+
 /**
- * Fetches the actual article page and extracts the first few paragraphs and the lead image
- * for a more detailed summary (bypass Node 18 ReferenceError by using native https)
+ * Helper to fetch HTML while following redirects
  */
-function fetchArticleData(url) {
+function fetchWithRedirects(url, depth = 0) {
   return new Promise((resolve) => {
+    if (depth > 5) return resolve(null);
+
     const options = {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+        'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
       },
-      timeout: 5000
+      timeout: 8000
     };
 
     https.get(url, options, (res) => {
-      if (res.statusCode !== 200) return resolve({ description: null, imageUrl: null });
+      // Follow HTTP redirects
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const nextUrl = urlModule.resolve(url, res.headers.location);
+        return resolve(fetchWithRedirects(nextUrl, depth + 1));
+      }
+
+      if (res.statusCode !== 200) return resolve(null);
       
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          // Extract text from <p> tags
-          const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
-          let description = null;
-          if (paragraphs) {
-            const cleanParagraphs = paragraphs
-              .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
-              .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
-
-            if (cleanParagraphs.length > 0) {
-              description = cleanParagraphs.slice(0, 4).join('\n\n');
-            }
-          }
-
-          // Extract og:image
-          const ogImageMatch = data.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
-          const twitterImageMatch = data.match(/<meta[^>]*name="twitter:image"[^>]*content="([^"]*)"/i);
-          const imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
-
-          resolve({ description, imageUrl });
-        } catch (e) {
-          resolve({ description: null, imageUrl: null });
-        }
-      });
-    }).on('error', () => {
-      resolve({ description: null, imageUrl: null });
-    });
+      res.on('end', () => resolve(data));
+    }).on('error', () => resolve(null));
   });
+}
+
+/**
+ * Fetches the actual article page and extracts the first few paragraphs and the lead image
+ */
+async function fetchArticleData(url) {
+  try {
+    let html = await fetchWithRedirects(url);
+    if (!html) return { description: null, imageUrl: null };
+
+    // Check for Google News intermediate page
+    // Looking for <a rel="nofollow" href="...">
+    const googleMatch = html.match(/<a[^>]*rel="nofollow"[^>]*href="([^"]*)"/i);
+    if (googleMatch) {
+        const realUrl = googleMatch[1];
+        console.log(`Following Google intermediate link: ${realUrl}`);
+        html = await fetchWithRedirects(realUrl);
+        if (!html) return { description: null, imageUrl: null };
+    }
+
+    // Extract text from <p> tags
+    const paragraphs = html.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+    let description = null;
+    if (paragraphs) {
+      const cleanParagraphs = paragraphs
+        .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+        .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+
+      if (cleanParagraphs.length > 0) {
+        description = cleanParagraphs.slice(0, 4).join('\n\n');
+      }
+    }
+
+    // Extract og:image
+    const ogImageMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
+    const twitterImageMatch = html.match(/<meta[^>]*name="twitter:image"[^>]*content="([^"]*)"/i);
+    const imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
+
+    return { description, imageUrl };
+  } catch (e) {
+    return { description: null, imageUrl: null };
+  }
 }
 
 async function runSearch() {

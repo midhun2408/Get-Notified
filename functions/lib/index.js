@@ -43,42 +43,61 @@ const admin = __importStar(require("firebase-admin"));
 const rss_parser_1 = __importDefault(require("rss-parser"));
 const https = __importStar(require("https"));
 admin.initializeApp();
-function fetchFullDescription(url) {
+const urlModule = __importStar(require("url"));
+function fetchWithRedirects(url, depth = 0) {
     return new Promise((resolve) => {
+        if (depth > 5)
+            return resolve(null);
         const options = {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+                'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
             },
-            timeout: 5000
+            timeout: 8000
         };
         https.get(url, options, (res) => {
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                const nextUrl = urlModule.resolve(url, res.headers.location);
+                return resolve(fetchWithRedirects(nextUrl, depth + 1));
+            }
             if (res.statusCode !== 200)
                 return resolve(null);
             let data = '';
             res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    const paragraphs = data.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
-                    if (!paragraphs)
-                        return resolve(null);
-                    const cleanParagraphs = paragraphs
-                        .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
-                        .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
-                    if (cleanParagraphs.length > 0) {
-                        resolve(cleanParagraphs.slice(0, 4).join('\n\n'));
-                    }
-                    else {
-                        resolve(null);
-                    }
-                }
-                catch (e) {
-                    resolve(null);
-                }
-            });
-        }).on('error', () => {
-            resolve(null);
-        });
+            res.on('end', () => resolve(data));
+        }).on('error', () => resolve(null));
     });
+}
+async function fetchArticleData(url) {
+    try {
+        let html = await fetchWithRedirects(url);
+        if (!html)
+            return { description: null, imageUrl: null };
+        const googleMatch = html.match(/<a[^>]*rel="nofollow"[^>]*href="([^"]*)"/i);
+        if (googleMatch) {
+            const realUrl = googleMatch[1];
+            html = await fetchWithRedirects(realUrl);
+            if (!html)
+                return { description: null, imageUrl: null };
+        }
+        const paragraphs = html.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
+        let description = null;
+        if (paragraphs) {
+            const cleanParagraphs = paragraphs
+                .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim())
+                .filter(p => p.length > 120 && !p.includes('{') && !p.includes('Subscribe') && !p.includes('Sign in'));
+            if (cleanParagraphs.length > 0) {
+                description = cleanParagraphs.slice(0, 4).join('\n\n');
+            }
+        }
+        const ogImageMatch = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i);
+        const twitterImageMatch = html.match(/<meta[^>]*name="twitter:image"[^>]*content="([^"]*)"/i);
+        const imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
+        return { description, imageUrl };
+    }
+    catch (e) {
+        return { description: null, imageUrl: null };
+    }
 }
 (0, v2_1.setGlobalOptions)({ maxInstances: 10 });
 const db = admin.firestore();
@@ -175,18 +194,19 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                         if (description.includes("Comprehensive up-to-date")) {
                             description = displayTitle;
                         }
-                        console.log(`[${topic}] Fetching full content for: ${displayTitle}`);
-                        const fullDesc = await fetchFullDescription(article.link);
-                        if (fullDesc) {
-                            description = fullDesc;
+                        console.log(`[${topic}] Fetching article data for: ${displayTitle}`);
+                        const articleData = await fetchArticleData(article.link);
+                        if (articleData.description) {
+                            description = articleData.description;
                         }
+                        const imageUrl = articleData.imageUrl;
                         console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
                         await newsRef.set({
                             topic,
                             title: displayTitle,
                             description: description,
                             url: article.link,
-                            imageUrl: null,
+                            imageUrl: imageUrl,
                             time: article.pubDate || new Date().toISOString(),
                             source: source,
                             timestamp: admin.firestore.FieldValue.serverTimestamp()
