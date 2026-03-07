@@ -1,6 +1,7 @@
 const admin = require('firebase-admin');
 const Parser = require('rss-parser');
 const https = require('https');
+const crypto = require('crypto');
 
 // Initialize Firebase Admin using Service Account from environment variable
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -249,9 +250,8 @@ async function runSearch() {
         for (const article of items) {
           if (!article.link || !article.title) continue;
 
-          // Normalize the hash to be consistent (Google News links are long/obfuscated)
-          // For direct links, the URL itself is a good ID
-          const articleHash = Buffer.from(article.link).toString('base64').substring(0, 100);
+          // Use MD5 hash for a safe and consistent document ID
+          const articleHash = crypto.createHash('md5').update(article.link).digest('hex');
           const newsRef = db.collection('news').doc(articleHash);
           const doc = await newsRef.get();
 

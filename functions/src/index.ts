@@ -4,6 +4,7 @@ import * as admin from "firebase-admin";
 import Parser from "rss-parser";
 import * as https from "https";
 import * as zlib from "zlib";
+import * as crypto from "crypto";
 
 admin.initializeApp();
 
@@ -244,8 +245,9 @@ export const searchNewsAI = onSchedule({
         for (const article of items) {
           if (!article.link || !article.title) continue;
 
-          const articleHash = Buffer.from(article.link).toString('base64').substring(0, 100);
-          const newsRef = db.collection('news').doc(articleHash);
+          // Use MD5 hash for a safe and consistent document ID
+          const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
+          const newsRef = db.collection("news").doc(articleHash);
           const doc = await newsRef.get();
 
           if (!doc.exists) {
