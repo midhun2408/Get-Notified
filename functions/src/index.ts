@@ -2,8 +2,6 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import Parser from "rss-parser";
-import axios from "axios";
-import * as cheerio from "cheerio";
 
 admin.initializeApp();
 
@@ -30,98 +28,109 @@ export const searchNewsAI = onSchedule({
 
     console.log(`Starting news search for ${allTopics.length} topics...`);
 
-    // Process all topics in parallel
-    await Promise.all(allTopics.map(async (topic) => {
+    // Map common topics to high-quality direct publisher feeds
+    const TOPIC_FEEDS: { [key: string]: string[] } = {
+      'Kerala': [
+        'https://www.thehindu.com/news/national/kerala/feeder/default.rss',
+        'https://www.onmanorama.com/rss/news.xml'
+      ],
+      'India': [
+        'https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms',
+        'https://www.thehindu.com/news/national/feeder/default.rss'
+      ],
+      'World': [
+        'https://www.aljazeera.com/xml/rss/all.xml',
+        'https://timesofindia.indiatimes.com/rssfeeds/29473334.cms'
+      ],
+      'Technology': [
+        'https://gadgets360.com/rss/feeds'
+      ]
+    };
+
+    console.log(`Searching for topics: ${allTopics.join(', ')}`);
+
+    for (const topic of allTopics) {
       try {
-        // Construct Google News RSS URL targeted at India/English for better regional results
-        const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
-        const feed = await parser.parseURL(feedUrl);
+        console.log(`--- Processing topic: ${topic} ---`);
+        let items: any[] = [];
         
-        // Take the top 3 items
-        const articles = feed.items.slice(0, 3);
-        if (!articles || articles.length === 0) return;
+        if (TOPIC_FEEDS[topic]) {
+            console.log(`Using direct publisher feeds for ${topic}`);
+            for (const url of TOPIC_FEEDS[topic]) {
+                try {
+                    const feed = await parser.parseURL(url);
+                    items = items.concat(feed.items.slice(0, 5));
+                } catch (e: any) {
+                    console.error(`Error fetching direct feed ${url}:`, e.message);
+                }
+            }
+        } else {
+            console.log(`No direct feed for ${topic}, falling back to Google News`);
+            const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
+            try {
+                const feed = await parser.parseURL(feedUrl);
+                items = feed.items.slice(0, 5);
+            } catch (e: any) {
+                console.error(`Error fetching Google News for ${topic}:`, e.message);
+            }
+        }
 
-        await Promise.all(articles.map(async (article) => {
-          if (!article.link || !article.title) return;
+        if (items.length === 0) continue;
 
-          const articleHash = Buffer.from(article.link).toString("base64");
-          const newsRef = db.collection("news").doc(articleHash);
+        for (const article of items) {
+          if (!article.link || !article.title) continue;
+
+          const articleHash = Buffer.from(article.link).toString('base64').substring(0, 100);
+          const newsRef = db.collection('news').doc(articleHash);
           const doc = await newsRef.get();
 
           if (!doc.exists) {
-            // New news found!
+            let source = "News";
+            let displayTitle = article.title;
+            let description = article.contentSnippet || article.description || article.content || "";
             
-            // Extract source from title if possible (Google usually appends "- SourceName")
-            let source = "Internet";
-            let cleanTitle = article.title;
-            const splitIndex = article.title.lastIndexOf(" - ");
-            if (splitIndex !== -1) {
-              source = article.title.substring(splitIndex + 3);
-              cleanTitle = article.title.substring(0, splitIndex);
+            description = description.replace(/<[^>]*>?/gm, '').trim();
+
+            if (article.source && article.source.name) {
+                source = article.source.name;
+            } else {
+                const splitIndex = article.title.lastIndexOf(" - ");
+                if (splitIndex !== -1) {
+                    source = article.title.substring(splitIndex + 3);
+                    displayTitle = article.title.substring(0, splitIndex);
+                } else {
+                    try {
+                        const urlObj = new URL(article.link);
+                        source = urlObj.hostname.replace('www.', '').split('.')[0];
+                        source = source.charAt(0).toUpperCase() + source.slice(1);
+                    } catch(e) {}
+                }
             }
 
-            // Google News RSS returns just the title in the description
-            let description = article.contentSnippet || article.content || "";
-            // The generic Google News redirect description we want to avoid
-            const genericGoogleDesc = "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.";
-            
-            const fetchConfig = {
-               timeout: 8000,
-               headers: {
-                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
-                 'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
-               }
-            };
-
-            if (!description || description.includes(cleanTitle) || description === genericGoogleDesc) {
-               try {
-                 // Fetch the Google News redirect page
-                 const initialReponse = await axios.get(article.link, fetchConfig);
-                 
-                 // Google News uses a c-wiz element with an a tag that has the real URL
-                 const initial$ = cheerio.load(initialReponse.data);
-                 let realUrl = initial$('a[rel="nofollow"]').attr('href') || article.link;
-                 
-                 // If that fails, see if it's just a meta refresh
-                 if (realUrl === article.link) {
-                     const refresh = initial$('meta[http-equiv="Refresh"]').attr('content');
-                     if (refresh) {
-                         const match = refresh.match(/URL=['"]?([^'"]+)['"]?/i);
-                         if (match) realUrl = match[1];
-                     }
-                 }
-
-                 // Now fetch the real article page
-                 const articleHtml = await axios.get(realUrl, fetchConfig);
-                 const $ = cheerio.load(articleHtml.data);
-                 description = $('meta[property="og:description"]').attr('content') || 
-                               $('meta[name="description"]').attr('content') || 
-                               cleanTitle;
-               } catch(e: any) {
-                 console.log(`Could not scrape description for ${cleanTitle}: ${e.message}`);
-                 description = cleanTitle; // fallback
-               }
+            if (description.includes("Comprehensive up-to-date")) {
+                description = displayTitle; 
             }
 
+            console.log(`[${topic}] New article found: ${displayTitle} (${source})`);
+            
             await newsRef.set({
               topic,
-              title: cleanTitle,
+              title: displayTitle,
               description: description,
               url: article.link,
-              image: null, // RSS rarely provides a clean image, UI should handle this
-              publishedAt: article.pubDate || new Date().toISOString(),
+              imageUrl: null,
+              time: article.pubDate || new Date().toISOString(),
               source: source,
               timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Trigger Push Notification
-            await sendNotification(topic, cleanTitle);
+            await sendNotification(topic, displayTitle);
           }
-        }));
-      } catch (error) {
-        console.error(`Error searching news for topic ${topic}:`, error);
+        }
+      } catch (error: any) {
+        console.error(`Error searching news for topic ${topic}:`, error.message);
       }
-    }));
+    }
 
     console.log("News search completed successfully.");  } catch (error) {
     console.error("Critical error in searchNewsAI function:", error);

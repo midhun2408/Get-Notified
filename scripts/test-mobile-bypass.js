@@ -1,5 +1,4 @@
 const https = require('https');
-const cheerio = require('cheerio');
 
 function getUrl(url, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -24,7 +23,7 @@ function getUrl(url, headers = {}) {
 async function run() {
   const url = 'https://news.google.com/rss/articles/CBMif0FVX3lxTE5wUXhXN2pWcXRUVlp6ZXZKWWVUMXZ1WUt6LVZleFdhbHRia0tHajh2UmV2R0NBMWh1cml0Q050bXlId19QajhVUG5zV0Vncnoyc3NkbjAwdnREUXhHZnNURzZ3NnV4S3NlZ3UwaThIcnJvVFFCR0s3YWQ4OHM3RjNnSFRfRWdERGdoeFE?oc=5';
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/100.0.4896.127 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
   };
@@ -32,12 +31,15 @@ async function run() {
   try {
     const { data, url: finalUrl } = await getUrl(url, headers);
     console.log('Final URL:', finalUrl);
+    // console.log('Data Snippet:', data.substring(0, 1000));
     
-    const $ = cheerio.load(data);
-    const description = $('meta[property="og:description"]').attr('content') || 
-                       $('meta[name="description"]').attr('content') || 
-                       "No description";
-    console.log('Description:', description);
+    if (data.includes('og:description')) {
+        const match = data.match(/property="og:description" content="([^"]+)"/);
+        console.log('og:description:', match ? match[1] : 'Not found');
+    } else {
+        console.log('og:description tag not found in HTML');
+    }
+
   } catch (e) {
     console.error('Error:', e.message);
   }
