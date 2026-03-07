@@ -82,16 +82,28 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
                             cleanTitle = article.title.substring(0, splitIndex);
                         }
                         let description = article.contentSnippet || article.content || "";
-                        if (!description || description.includes(cleanTitle)) {
+                        const genericGoogleDesc = "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.";
+                        if (!description || description.includes(cleanTitle) || description === genericGoogleDesc) {
                             try {
-                                const articleHtml = await axios_1.default.get(article.link, { timeout: 5000 });
+                                const initialReponse = await axios_1.default.get(article.link, { timeout: 5000 });
+                                const initial$ = cheerio.load(initialReponse.data);
+                                let realUrl = initial$('a[rel="nofollow"]').attr('href') || article.link;
+                                if (realUrl === article.link) {
+                                    const refresh = initial$('meta[http-equiv="Refresh"]').attr('content');
+                                    if (refresh) {
+                                        const match = refresh.match(/URL=['"]?([^'"]+)['"]?/i);
+                                        if (match)
+                                            realUrl = match[1];
+                                    }
+                                }
+                                const articleHtml = await axios_1.default.get(realUrl, { timeout: 8000 });
                                 const $ = cheerio.load(articleHtml.data);
                                 description = $('meta[property="og:description"]').attr('content') ||
                                     $('meta[name="description"]').attr('content') ||
                                     cleanTitle;
                             }
                             catch (e) {
-                                console.log(`Could not scrape description for ${cleanTitle}`);
+                                console.log(`Could not scrape description for ${cleanTitle}: ${e.message}`);
                                 description = cleanTitle;
                             }
                         }

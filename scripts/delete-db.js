@@ -40,9 +40,7 @@ async function deleteQueryBatch(db, query, resolve) {
 async function run() {
   console.log("Deleting all news...");
   await deleteCollection('news', 500);
-  console.log("Deleting all topics...");
-  await deleteCollection('topics', 500);
-  console.log("Database cleared successfully.");
+  console.log("Database news cleared successfully.");
 }
 
 run().then(() => process.exit(0)).catch((err) => {

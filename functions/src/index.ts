@@ -62,15 +62,35 @@ export const searchNewsAI = onSchedule({
 
             // Google News RSS returns just the title in the description
             let description = article.contentSnippet || article.content || "";
-            if (!description || description.includes(cleanTitle)) {
+            // The generic Google News redirect description we want to avoid
+            const genericGoogleDesc = "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.";
+            
+            if (!description || description.includes(cleanTitle) || description === genericGoogleDesc) {
                try {
-                 const articleHtml = await axios.get(article.link, { timeout: 5000 });
+                 // Fetch the Google News redirect page
+                 const initialReponse = await axios.get(article.link, { timeout: 5000 });
+                 
+                 // Google News uses a c-wiz element with an a tag that has the real URL
+                 const initial$ = cheerio.load(initialReponse.data);
+                 let realUrl = initial$('a[rel="nofollow"]').attr('href') || article.link;
+                 
+                 // If that fails, see if it's just a meta refresh
+                 if (realUrl === article.link) {
+                     const refresh = initial$('meta[http-equiv="Refresh"]').attr('content');
+                     if (refresh) {
+                         const match = refresh.match(/URL=['"]?([^'"]+)['"]?/i);
+                         if (match) realUrl = match[1];
+                     }
+                 }
+
+                 // Now fetch the real article page
+                 const articleHtml = await axios.get(realUrl, { timeout: 8000 });
                  const $ = cheerio.load(articleHtml.data);
                  description = $('meta[property="og:description"]').attr('content') || 
                                $('meta[name="description"]').attr('content') || 
                                cleanTitle;
-               } catch(e) {
-                 console.log(`Could not scrape description for ${cleanTitle}`);
+               } catch(e: any) {
+                 console.log(`Could not scrape description for ${cleanTitle}: ${e.message}`);
                  description = cleanTitle; // fallback
                }
             }
