@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Firestore, doc, docData } from '@angular/fire/firestore';
+import { Firestore, doc, docData, deleteDoc } from '@angular/fire/firestore';
 import { Observable, of } from 'rxjs';
 
 @Component({
@@ -22,6 +22,19 @@ export class NewsDetailComponent implements OnInit {
     if (id) {
       const newsRef = doc(this.firestore, `news/${id}`);
       this.newsItem$ = docData(newsRef);
+    }
+  }
+
+  async markAsRead() {
+    const id = this.route.snapshot.paramMap.get('id');
+    if (id) {
+      try {
+        const newsRef = doc(this.firestore, `news/${id}`);
+        await deleteDoc(newsRef);
+        this.goBack();
+      } catch (error) {
+        console.error('Error deleting news item:', error);
+      }
     }
   }
 

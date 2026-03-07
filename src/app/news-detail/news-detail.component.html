@@ -32,6 +32,10 @@
           {{ item.description || 'Intercepted transmission content follows: Seeking additional details from secondary relays.' }}
         </p>
 
+        <button (click)="markAsRead()" class="block w-full text-center py-4 mb-3 rounded-xl bg-neonPink text-white font-bold tracking-widest hover:shadow-neon-pink transition-all duration-300">
+          MARK AS READ
+        </button>
+
         <a [href]="item.url" target="_blank" class="block w-full text-center py-4 rounded-xl bg-neonBlue text-black font-bold tracking-widest hover:shadow-neon-blue transition-all duration-300">
           VIEW FULL SOURCE 
         </a>
