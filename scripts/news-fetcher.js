@@ -59,10 +59,18 @@ async function runSearch() {
             // The generic Google News redirect description we want to avoid
             const genericGoogleDesc = "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.";
             
+            const fetchConfig = {
+               timeout: 8000,
+               headers: {
+                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+                 'Cookie': 'CONSENT=YES+cb.20230501-14-p0.en+FX+386;'
+               }
+            };
+
             if (!description || description.includes(cleanTitle) || description === genericGoogleDesc) {
                try {
                  // Fetch the Google News redirect page
-                 const initialReponse = await axios.get(article.link, { timeout: 5000 });
+                 const initialReponse = await axios.get(article.link, fetchConfig);
                  
                  // Google News uses a c-wiz element with an a tag that has the real URL
                  const initial$ = cheerio.load(initialReponse.data);
@@ -78,7 +86,7 @@ async function runSearch() {
                  }
 
                  // Now fetch the real article page
-                 const articleHtml = await axios.get(realUrl, { timeout: 8000 });
+                 const articleHtml = await axios.get(realUrl, fetchConfig);
                  const $ = cheerio.load(articleHtml.data);
                  description = $('meta[property="og:description"]').attr('content') || 
                                $('meta[name="description"]').attr('content') || 
