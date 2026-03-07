@@ -23,9 +23,7 @@ jobs:
 
       - name: Install Dependencies
         working-directory: scripts
-        run: |
-          if [ ! -f package.json ]; then npm init -y; fi
-          npm install firebase-admin axios
+        run: npm install
 
       - name: Run News Fetcher
         env:
