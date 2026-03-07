@@ -1,4 +1,5 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import Parser from "rss-parser";
@@ -171,10 +172,132 @@ async function fetchArticleData(url: string): Promise<{ description: string | nu
 }
 
 // Set global options for all v2 functions
-setGlobalOptions({ maxInstances: 10 });
+setGlobalOptions({ maxInstances: 10, region: "us-central1" });
 
 const db = admin.firestore();
 const parser = new Parser();
+
+// Map common topics to high-quality direct publisher feeds
+const TOPIC_FEEDS: { [key: string]: string[] } = {
+  'Kerala': [
+    'https://www.thehindu.com/news/national/kerala/feeder/default.rss',
+    'https://www.onmanorama.com/rss/news.xml'
+  ],
+  'India': [
+    'https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms',
+    'https://www.thehindu.com/news/national/feeder/default.rss'
+  ],
+  'World': [
+    'https://www.aljazeera.com/xml/rss/all.xml',
+    'https://timesofindia.indiatimes.com/rssfeeds/29473334.cms'
+  ],
+  'Technology': [
+    'https://gadgets360.com/rss/feeds'
+  ]
+};
+
+/**
+ * Processes a single topic: fetches, cleans, and saves news
+ */
+async function processTopic(topic: string) {
+  try {
+    console.log(`--- Processing topic: ${topic} ---`);
+    let items: any[] = [];
+    
+    if (TOPIC_FEEDS[topic]) {
+        console.log(`Using direct publisher feeds for ${topic}`);
+        for (const url of TOPIC_FEEDS[topic]) {
+            try {
+                const feed = await parser.parseURL(url);
+                items = items.concat(feed.items.slice(0, 5));
+            } catch (e: any) {
+                console.error(`Error fetching direct feed ${url}:`, e.message);
+            }
+        }
+    } else {
+        console.log(`No direct feed for ${topic}, falling back to Bing News RSS`);
+        const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
+        try {
+            const feed = await parser.parseURL(feedUrl);
+            items = feed.items.slice(0, 5);
+        } catch (e: any) {
+            console.error(`Error fetching Bing News for ${topic}:`, e.message);
+        }
+    }
+
+    if (items.length === 0) return;
+
+    for (const article of items) {
+      if (!article.link || !article.title) continue;
+
+      // Use MD5 hash for a safe and consistent document ID
+      const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
+      const newsRef = db.collection("news").doc(articleHash);
+      const doc = await newsRef.get();
+
+      if (!doc.exists) {
+        let source = "News";
+        let displayTitle = article.title;
+        let description = article.contentSnippet || article.description || article.content || "";
+        
+        description = description.replace(/<[^>]*>?/gm, '').trim();
+
+        if (article.source && article.source.name) {
+            source = article.source.name;
+        } else {
+            const splitIndex = article.title.lastIndexOf(" - ");
+            if (splitIndex !== -1) {
+                source = article.title.substring(splitIndex + 3);
+                displayTitle = article.title.substring(0, splitIndex);
+            } else {
+                try {
+                    const urlObj = new URL(article.link);
+                    source = urlObj.hostname.replace('www.', '').split('.')[0];
+                    source = source.charAt(0).toUpperCase() + source.slice(1);
+                } catch(e) {}
+            }
+        }
+
+        if (description.includes("Comprehensive up-to-date")) {
+            description = displayTitle; 
+        }
+
+        // ENRICHMENT
+        console.log(`[${topic}] Processing story: ${displayTitle}`);
+        let imageUrl: string | null = null;
+        const content = (article as any).content || article.contentSnippet || "";
+        if (content) {
+            const imgMatch = content.match(/<img[^>]*src="([^"]*)"/i);
+            if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
+                imageUrl = imgMatch[1];
+            }
+        }
+
+        const articleData = await fetchArticleData(article.link);
+        if (articleData.description) description = articleData.description;
+        if (articleData.imageUrl) imageUrl = articleData.imageUrl;
+
+        console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
+        
+        await newsRef.set({
+          topic,
+          title: displayTitle,
+          description: description,
+          url: article.link,
+          imageUrl: imageUrl,
+          time: article.pubDate || new Date().toISOString(),
+          source: source,
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        await sendNotification(topic, displayTitle);
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+      }
+    }
+  } catch (error: any) {
+    console.error(`Error in processTopic for ${topic}:`, error.message);
+  }
+}
 
 // Scheduled function to run every 10 minutes
 export const searchNewsAI = onSchedule({
@@ -191,143 +314,47 @@ export const searchNewsAI = onSchedule({
       return;
     }
 
-    console.log(`Starting news search for ${allTopics.length} topics...`);
-
-    // Map common topics to high-quality direct publisher feeds
-    const TOPIC_FEEDS: { [key: string]: string[] } = {
-      'Kerala': [
-        'https://www.thehindu.com/news/national/kerala/feeder/default.rss',
-        'https://www.onmanorama.com/rss/news.xml'
-      ],
-      'India': [
-        'https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms',
-        'https://www.thehindu.com/news/national/feeder/default.rss'
-      ],
-      'World': [
-        'https://www.aljazeera.com/xml/rss/all.xml',
-        'https://timesofindia.indiatimes.com/rssfeeds/29473334.cms'
-      ],
-      'Technology': [
-        'https://gadgets360.com/rss/feeds'
-      ]
-    };
-
-    console.log(`Searching for topics: ${allTopics.join(', ')}`);
-
+    console.log(`Starting scheduled news search for ${allTopics.length} topics...`);
     for (const topic of allTopics) {
-      try {
-        console.log(`--- Processing topic: ${topic} ---`);
-        let items: any[] = [];
-        
-        if (TOPIC_FEEDS[topic]) {
-            console.log(`Using direct publisher feeds for ${topic}`);
-            for (const url of TOPIC_FEEDS[topic]) {
-                try {
-                    const feed = await parser.parseURL(url);
-                    items = items.concat(feed.items.slice(0, 5));
-                } catch (e: any) {
-                    console.error(`Error fetching direct feed ${url}:`, e.message);
-                }
-            }
-        } else {
-            console.log(`No direct feed for ${topic}, falling back to Bing News RSS`);
-            const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
-            try {
-                const feed = await parser.parseURL(feedUrl);
-                items = feed.items.slice(0, 5);
-            } catch (e: any) {
-                console.error(`Error fetching Bing News for ${topic}:`, e.message);
-            }
-        }
-
-        if (items.length === 0) continue;
-
-        for (const article of items) {
-          if (!article.link || !article.title) continue;
-
-          // Use MD5 hash for a safe and consistent document ID
-          const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
-          const newsRef = db.collection("news").doc(articleHash);
-          const doc = await newsRef.get();
-
-          if (!doc.exists) {
-            let source = "News";
-            let displayTitle = article.title;
-            let description = article.contentSnippet || article.description || article.content || "";
-            
-            description = description.replace(/<[^>]*>?/gm, '').trim();
-
-            if (article.source && article.source.name) {
-                source = article.source.name;
-            } else {
-                const splitIndex = article.title.lastIndexOf(" - ");
-                if (splitIndex !== -1) {
-                    source = article.title.substring(splitIndex + 3);
-                    displayTitle = article.title.substring(0, splitIndex);
-                } else {
-                    try {
-                        const urlObj = new URL(article.link);
-                        source = urlObj.hostname.replace('www.', '').split('.')[0];
-                        source = source.charAt(0).toUpperCase() + source.slice(1);
-                    } catch(e) {}
-                }
-            }
-
-            if (description.includes("Comprehensive up-to-date")) {
-                description = displayTitle; 
-            }
-
-            // ENRICHMENT: Fetch longer description and lead image for new articles
-            console.log(`[${topic}] Processing story: ${displayTitle}`);
-            
-            // A. Try to extract image from RSS content (Google News embeds them in a table)
-            let imageUrl: string | null = null;
-            const content = (article as any).content || article.contentSnippet || "";
-            if (content) {
-                const imgMatch = content.match(/<img[^>]*src="([^"]*)"/i);
-                if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
-                    imageUrl = imgMatch[1];
-                }
-            }
-
-            // B. Fetch full article data (paragraphs + better image)
-            const articleData = await fetchArticleData(article.link);
-            
-            if (articleData.description) {
-                description = articleData.description;
-            }
-            // Prefer the scraped high-res image if found and not a logo
-            if (articleData.imageUrl) {
-                imageUrl = articleData.imageUrl;
-            }
-
-            console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
-            
-            await newsRef.set({
-              topic,
-              title: displayTitle,
-              description: description,
-              url: article.link,
-              imageUrl: imageUrl,
-              time: article.pubDate || new Date().toISOString(),
-              source: source,
-              timestamp: admin.firestore.FieldValue.serverTimestamp()
-            });
-
-            await sendNotification(topic, displayTitle);
-
-            // C. Wait briefly to look more human and avoid rate limits (Cloud Functions have better limits but still)
-            await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
-          }
-        }
-      } catch (error: any) {
-        console.error(`Error searching news for topic ${topic}:`, error.message);
-      }
+      await processTopic(topic);
     }
-
-    console.log("News search completed successfully.");  } catch (error) {
+    console.log("Scheduled news search completed successfully.");
+  } catch (error) {
     console.error("Critical error in searchNewsAI function:", error);
   }
+});
+
+/**
+ * Triggered when a new topic is added
+ */
+export const onTopicCreated = onDocumentCreated("topics/{topicId}", async (event) => {
+  const data = event.data?.data();
+  if (!data || !data.name) return;
+  
+  console.log(`[Trigger] New topic added: ${data.name}. Fetching news...`);
+  await processTopic(data.name);
+});
+
+/**
+ * Triggered when a topic is deleted - Cleans up related news
+ */
+export const onTopicDeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
+  const data = event.data?.data();
+  if (!data || !data.name) return;
+  
+  const topicName = data.name;
+  console.log(`[Trigger] Topic deleted: ${topicName}. Cleaning up news...`);
+  
+  const newsRef = db.collection("news");
+  const q = newsRef.where("topic", "==", topicName);
+  const snapshot = await q.get();
+  
+  if (snapshot.empty) return;
+  
+  const batch = db.batch();
+  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
+  console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
 
 async function sendNotification(topic: string, title: string) {
