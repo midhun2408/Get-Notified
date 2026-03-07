@@ -1,34 +1,39 @@
 <ion-header class="ion-no-border">
-  <ion-toolbar class="bg-darkBg py-2 px-4 border-b border-glassBg shadow-neon-blue">
+  <ion-toolbar style="--background: transparent; --color: inherit;" class="bg-white dark:bg-darkBg py-2 px-4 border-b border-gray-200 dark:border-glassBg shadow-sm dark:shadow-neon-blue transition-all duration-300">
     <ion-buttons slot="start">
-      <ion-button (click)="goBack()" class="text-neonBlue">
+      <ion-button (click)="goBack()" class="text-gray-600 dark:text-neonBlue">
         <ion-icon name="arrow-back-outline" slot="icon-only"></ion-icon>
       </ion-button>
     </ion-buttons>
-    <ion-title class="text-neonBlue font-bold tracking-widest text-xl font-sans">DETAILS</ion-title>
+    <ion-title class="text-gray-900 dark:text-neonBlue font-bold tracking-widest text-xl font-sans text-center">DETAILS</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="themeService.toggleTheme()" class="text-gray-600 dark:text-neonBlue">
+        <ion-icon [name]="themeService.isDarkMode() ? 'sunny-outline' : 'moon-outline'" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="bg-darkBg">
+<ion-content style="--background: transparent; --color: inherit;" class="bg-gray-50 dark:bg-darkBg transition-all duration-300">
   <div *ngIf="newsItem$ | async as item; else loading" class="relative min-h-full">
     <!-- Hero Image -->
     <div *ngIf="item.image" class="w-full h-72 relative">
       <img [src]="item.image" class="w-full h-full object-cover">
-      <div class="absolute inset-0 bg-gradient-to-t from-darkBg to-transparent opacity-80"></div>
+      <div class="absolute inset-0 bg-gradient-to-t from-gray-50 dark:from-darkBg to-transparent opacity-80"></div>
     </div>
 
     <div class="p-6 -mt-12 relative">
-      <div class="bg-[#0d0d14] rounded-3xl p-6 border border-glassBg shadow-2xl">
+      <div class="bg-white dark:bg-[#0d0d14] rounded-3xl p-6 border border-gray-100 dark:border-glassBg shadow-xl dark:shadow-2xl transition-colors duration-300">
         <span class="text-xs font-semibold uppercase text-neonPink tracking-widest mb-4 inline-block">{{ item.topic }}</span>
-        <h1 class="text-3xl font-bold text-white leading-tight mb-4">{{ item.title }}</h1>
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-white leading-tight mb-4">{{ item.title }}</h1>
         
-        <div class="flex items-center space-x-3 text-xs text-gray-400 font-mono mb-6 pb-6 border-b border-glassBg">
-           <span class="px-2 py-1 bg-glassBg rounded-md border border-neonPurple text-neonPurple">{{ item.source }}</span>
+        <div class="flex items-center space-x-3 text-xs text-gray-500 dark:text-gray-400 font-mono mb-6 pb-6 border-b border-gray-100 dark:border-glassBg">
+           <span class="px-2 py-1 bg-gray-50 dark:bg-glassBg rounded-md border border-neonPurple text-neonPurple">{{ item.source }}</span>
            <span>•</span>
-           <span>{{ item.publishedAt | date:'short' }}</span>
+           <span>{{ (item.timestamp || item.time) | date:'medium' }}</span>
         </div>
 
-        <p class="text-gray-300 leading-relaxed text-lg mb-8 font-sans">
+        <p class="text-gray-700 dark:text-gray-300 leading-relaxed text-lg mb-8 font-sans">
           {{ item.description || 'Intercepted transmission content follows: Seeking additional details from secondary relays.' }}
         </p>
 

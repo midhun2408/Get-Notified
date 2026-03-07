@@ -1,20 +1,23 @@
 <ion-header class="ion-no-border">
-  <ion-toolbar class="bg-darkBg py-2 px-4 border-b border-glassBg shadow-neon-blue">
-    <ion-title class="text-neonBlue font-bold tracking-widest text-2xl font-sans">NEXUS</ion-title>
+  <ion-toolbar style="--background: transparent; --color: inherit;" class="bg-white dark:bg-darkBg py-2 px-4 border-b border-gray-200 dark:border-glassBg shadow-sm dark:shadow-neon-blue transition-all duration-300">
+    <ion-title class="text-gray-900 dark:text-neonBlue font-bold tracking-widest text-2xl font-sans">NewsMate</ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="goToTopics()" class="text-neonPurple">
+      <ion-button (click)="themeService.toggleTheme()" class="text-gray-600 dark:text-neonBlue">
+        <ion-icon [name]="themeService.isDarkMode() ? 'sunny-outline' : 'moon-outline'" slot="icon-only"></ion-icon>
+      </ion-button>
+      <ion-button (click)="goToTopics()" class="text-neonPurple dark:text-neonPurple">
         <ion-icon name="options-outline" slot="icon-only"></ion-icon>
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="bg-darkBg">
-  <div class="p-4 bg-darkBg min-h-full pb-24">
+<ion-content style="--background: transparent; --color: inherit;" class="bg-gray-50 dark:bg-darkBg transition-all duration-300">
+  <div class="p-4 bg-gray-50 dark:bg-darkBg min-h-full pb-24 transition-colors duration-300">
     
     <!-- Topics Pill Menu -->
     <div class="flex overflow-x-auto space-x-3 mb-6 pb-2 scrollbar-hide">
-      <div *ngFor="let t of topics" class="whitespace-nowrap px-4 py-1.5 rounded-full border border-neonBlue text-neonBlue bg-glassBg shadow-neon-blue text-sm uppercase tracking-wide">
+      <div *ngFor="let t of topics" class="whitespace-nowrap px-4 py-1.5 rounded-full border border-gray-300 dark:border-neonBlue text-gray-600 dark:text-neonBlue bg-white dark:bg-glassBg shadow-sm dark:shadow-neon-blue text-sm uppercase tracking-wide transition-all">
         {{ t }}
       </div>
     </div>
@@ -22,16 +25,16 @@
     <!-- Feed -->
     <div class="space-y-6">
       <div *ngFor="let item of news" (click)="goToDetail(item.id)" class="relative group cursor-pointer">
-        <div class="absolute -inset-0.5 bg-gradient-to-r from-neonBlue to-neonPurple rounded-2xl blur opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-        <div class="relative bg-[#0d0d14] rounded-2xl p-4 overflow-hidden shadow-2xl border border-glassBg flex flex-col items-start h-full">
-          <div *ngIf="item.imageUrl" class="w-full h-40 mb-4 overflow-hidden rounded-xl border border-glassBg">
+        <div class="absolute -inset-0.5 bg-gradient-to-r from-neonBlue to-neonPurple rounded-2xl blur opacity-0 dark:opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+        <div class="relative bg-white dark:bg-[#0d0d14] rounded-2xl p-4 overflow-hidden shadow-md dark:shadow-2xl border border-gray-100 dark:border-glassBg flex flex-col items-start h-full transition-colors duration-300">
+          <div *ngIf="item.imageUrl" class="w-full h-40 mb-4 overflow-hidden rounded-xl border border-gray-100 dark:border-glassBg">
             <img [src]="item.imageUrl" alt="News Image" class="w-full h-full object-cover transform transition duration-500 group-hover:scale-110">
           </div>
           <span class="text-xs font-semibold uppercase text-neonPink tracking-widest mb-2">{{ item.topic }}</span>
-          <h2 class="text-xl font-bold text-gray-100 leading-tight mb-3 group-hover:text-white">{{ item.title }}</h2>
-          <div class="mt-auto flex justify-between w-full text-xs text-gray-500 font-mono tracking-tight">
+          <h2 class="text-xl font-bold text-gray-800 dark:text-gray-100 leading-tight mb-3 group-hover:text-black dark:group-hover:text-white">{{ item.title }}</h2>
+          <div class="mt-auto flex justify-between w-full text-xs text-gray-400 dark:text-gray-500 font-mono tracking-tight">
             <span>{{ item.source }}</span>
-            <span>{{ item.time }}</span>
+            <span>{{ (item.timestamp || item.time) | date:'short' }}</span>
           </div>
         </div>
       </div>

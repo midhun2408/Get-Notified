@@ -1,13 +1,50 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchNewsAI = void 0;
 const scheduler_1 = require("firebase-functions/v2/scheduler");
-const admin = require("firebase-admin");
-const axios_1 = require("axios");
 const v2_1 = require("firebase-functions/v2");
+const admin = __importStar(require("firebase-admin"));
+const rss_parser_1 = __importDefault(require("rss-parser"));
 admin.initializeApp();
 (0, v2_1.setGlobalOptions)({ maxInstances: 10 });
 const db = admin.firestore();
+const parser = new rss_parser_1.default();
 exports.searchNewsAI = (0, scheduler_1.onSchedule)({
     schedule: "*/10 * * * *",
     timeoutSeconds: 540,
@@ -23,27 +60,36 @@ exports.searchNewsAI = (0, scheduler_1.onSchedule)({
         console.log(`Starting news search for ${allTopics.length} topics...`);
         await Promise.all(allTopics.map(async (topic) => {
             try {
-                const apiKey = process.env.GNEWS_API_KEY || "REPLACE_WITH_YOUR_GNEWS_API_KEY";
-                const response = await axios_1.default.get(`https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&token=${apiKey}&lang=en&max=3`);
-                const articles = response.data.articles;
+                const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en-IN&gl=IN&ceid=IN:en`;
+                const feed = await parser.parseURL(feedUrl);
+                const articles = feed.items.slice(0, 3);
                 if (!articles || articles.length === 0)
                     return;
                 await Promise.all(articles.map(async (article) => {
-                    const articleHash = Buffer.from(article.url).toString("base64");
+                    if (!article.link || !article.title)
+                        return;
+                    const articleHash = Buffer.from(article.link).toString("base64");
                     const newsRef = db.collection("news").doc(articleHash);
                     const doc = await newsRef.get();
                     if (!doc.exists) {
+                        let source = "Internet";
+                        let cleanTitle = article.title;
+                        const splitIndex = article.title.lastIndexOf(" - ");
+                        if (splitIndex !== -1) {
+                            source = article.title.substring(splitIndex + 3);
+                            cleanTitle = article.title.substring(0, splitIndex);
+                        }
                         await newsRef.set({
                             topic,
-                            title: article.title,
-                            description: article.description,
-                            url: article.url,
-                            image: article.image,
-                            publishedAt: article.publishedAt,
-                            source: article.source.name,
+                            title: cleanTitle,
+                            description: article.contentSnippet || article.content || "",
+                            url: article.link,
+                            image: null,
+                            publishedAt: article.pubDate || new Date().toISOString(),
+                            source: source,
                             timestamp: admin.firestore.FieldValue.serverTimestamp()
                         });
-                        await sendNotification(topic, article.title);
+                        await sendNotification(topic, cleanTitle);
                     }
                 }));
             }

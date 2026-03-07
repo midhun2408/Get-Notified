@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.getnotified.app',
-  appName: 'Get-Notified',
+  appId: 'com.newsmate.app',
+  appName: 'NewsMate',
   webDir: 'dist/get-notified'
 };
 

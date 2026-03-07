@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { NotificationService } from './services/notification.service';
+import { ThemeService } from './services/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -9,7 +10,10 @@ import { NotificationService } from './services/notification.service';
 export class AppComponent implements OnInit {
   title = 'Get-Notified';
 
-  constructor(private notificationService: NotificationService) {}
+  constructor(
+    private notificationService: NotificationService,
+    private themeService: ThemeService
+  ) {}
 
   ngOnInit() {
     this.notificationService.requestPermission();

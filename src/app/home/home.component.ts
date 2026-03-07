@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { NewsService, NewsItem } from '../services/news.service';
+import { ThemeService } from '../services/theme.service';
 
 @Component({
   selector: 'app-home',
@@ -11,7 +12,11 @@ export class HomeComponent  implements OnInit {
   news: NewsItem[] = [];
   topics: string[] = [];
 
-  constructor(private newsService: NewsService, private router: Router) { }
+  constructor(
+    private newsService: NewsService, 
+    private router: Router,
+    public themeService: ThemeService
+  ) { }
 
   ngOnInit() {
     this.newsService.getTopics().subscribe(topics => {

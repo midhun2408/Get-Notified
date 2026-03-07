@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Firestore, collection, collectionData, query, where, addDoc, deleteDoc, doc, updateDoc } from '@angular/fire/firestore';
+import { Firestore, collection, collectionData, query, where, addDoc, deleteDoc, doc, updateDoc, orderBy } from '@angular/fire/firestore';
 import { Observable, BehaviorSubject, map, switchMap } from 'rxjs';
 
 export interface NewsItem {
@@ -8,6 +8,7 @@ export interface NewsItem {
   title: string;
   source: string;
   time: string;
+  timestamp: any;
   url: string;
   imageUrl?: string;
   description?: string;
@@ -41,6 +42,16 @@ export class NewsService {
     
     const newsRef = collection(this.firestore, 'news');
     const q = query(newsRef, where('topic', 'in', topics));
-    return collectionData(q, { idField: 'id' }) as Observable<NewsItem[]>;
+    return (collectionData(q, { idField: 'id' }) as Observable<NewsItem[]>).pipe(
+      map(news => news.map(item => ({
+        ...item,
+        timestamp: item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000) : item.timestamp
+      }))),
+      map(news => news.sort((a, b) => {
+        const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp || a.time).getTime();
+        const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp || b.time).getTime();
+        return timeB - timeA;
+      }))
+    );
   }
 }

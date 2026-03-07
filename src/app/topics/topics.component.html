@@ -1,32 +1,37 @@
 <ion-header class="ion-no-border">
-  <ion-toolbar class="bg-darkBg py-2 px-4 border-b border-glassBg shadow-neon-purple">
+  <ion-toolbar style="--background: transparent; --color: inherit;" class="bg-white dark:bg-darkBg py-2 px-4 border-b border-gray-200 dark:border-glassBg shadow-sm dark:shadow-neon-purple transition-all duration-300">
     <ion-buttons slot="start">
-      <ion-button (click)="goBack()" class="text-neonBlue">
+      <ion-button (click)="goBack()" class="text-gray-600 dark:text-neonBlue">
         <ion-icon name="arrow-back-outline" slot="icon-only"></ion-icon>
       </ion-button>
     </ion-buttons>
-    <ion-title class="text-neonPurple font-bold tracking-widest text-xl font-sans">DATALINK</ion-title>
+    <ion-title class="text-gray-900 dark:text-neonPurple font-bold tracking-widest text-xl font-sans text-center">DATALINK</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="themeService.toggleTheme()" class="text-gray-600 dark:text-neonBlue">
+        <ion-icon [name]="themeService.isDarkMode() ? 'sunny-outline' : 'moon-outline'" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="bg-darkBg">
-  <div class="p-4 bg-darkBg min-h-full">
+<ion-content style="--background: transparent; --color: inherit;" class="bg-gray-50 dark:bg-darkBg transition-all duration-300">
+  <div class="p-4 bg-gray-50 dark:bg-darkBg min-h-full transition-colors duration-300">
     
     <div class="mb-8 mt-4">
-      <h2 class="text-gray-300 font-mono text-xs tracking-[0.2em] mb-4 uppercase">Initialize New Topic</h2>
+      <h2 class="text-gray-500 dark:text-gray-300 font-mono text-xs tracking-[0.2em] mb-4 uppercase">Initialize New Topic</h2>
       
       <div class="relative flex items-center">
-        <div class="absolute inset-0 bg-neonBlue opacity-20 blur rounded-xl"></div>
-        <div class="relative flex w-full bg-[#0d0d14] rounded-xl border border-neonBlue shadow-neon-blue overflow-hidden focus-within:ring-2 ring-neonBlue">
+        <div class="absolute inset-0 bg-neonBlue opacity-10 dark:opacity-20 blur rounded-xl"></div>
+        <div class="relative flex w-full bg-white dark:bg-[#0d0d14] rounded-xl border border-gray-300 dark:border-neonBlue shadow-sm dark:shadow-neon-blue overflow-hidden focus-within:ring-2 ring-neonBlue transition-all">
           <input 
             type="text" 
             [(ngModel)]="newTopic" 
             (keyup.enter)="addTopic()"
             placeholder="e.g. Cybernetics..." 
-            class="flex-1 bg-transparent text-white px-4 py-3 outline-none font-mono placeholder-gray-600">
+            class="flex-1 bg-transparent text-gray-900 dark:text-white px-4 py-3 outline-none font-mono placeholder-gray-400 dark:placeholder-gray-600">
           <button 
             (click)="addTopic()" 
-            class="px-5 bg-glassBg text-neonBlue font-bold border-l border-neonBlue hover:bg-neonBlue hover:text-black transition-colors duration-300">
+            class="px-5 bg-gray-50 dark:bg-glassBg text-neonBlue font-bold border-l border-gray-300 dark:border-neonBlue hover:bg-neonBlue hover:text-black transition-colors duration-300">
             ADD
           </button>
         </div>
@@ -37,9 +42,9 @@
       <h2 class="text-gray-300 font-mono text-xs tracking-[0.2em] mb-4 uppercase">Active Transmissions</h2>
       
       <div class="space-y-3">
-        <div *ngFor="let topic of topics" class="group relative flex justify-between items-center p-4 bg-[#0d0d14] rounded-xl border border-glassBg hover:border-neonPurple transition-colors duration-300">
-          <span class="text-gray-100 font-medium tracking-wide">{{ topic }}</span>
-          <button (click)="removeTopic(topic)" class="text-gray-500 hover:text-neonPink transition-colors p-1">
+        <div *ngFor="let topic of topics" class="group relative flex justify-between items-center p-4 bg-white dark:bg-[#0d0d14] rounded-xl border border-gray-200 dark:border-glassBg hover:border-neonPurple transition-colors duration-300 shadow-sm dark:shadow-none">
+          <span class="text-gray-800 dark:text-gray-100 font-medium tracking-wide">{{ topic }}</span>
+          <button (click)="removeTopic(topic)" class="text-gray-400 hover:text-neonPink transition-colors p-1">
             <ion-icon name="close-circle-outline" class="text-xl"></ion-icon>
           </button>
         </div>
