@@ -31,8 +31,8 @@ export class TopicsComponent  implements OnInit {
     }
   }
 
-  removeTopic(id: string) {
-    this.newsService.removeTopic(id);
+  removeTopic(id: string, name: string) {
+    this.newsService.removeTopic(id, name);
   }
 
   goBack() {

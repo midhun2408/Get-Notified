@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: '*/15 * * * *' # Every 15 mins (more stable for GitHub Actions)
   workflow_dispatch: # Allows manual trigger
+  repository_dispatch:
+    types: [topic-update]
 
 jobs:
   search-news:

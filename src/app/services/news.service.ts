@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Firestore, collection, collectionData, query, where, addDoc, deleteDoc, doc, updateDoc, orderBy } from '@angular/fire/firestore';
+import { Firestore, collection, collectionData, query, where, addDoc, deleteDoc, doc, updateDoc, orderBy, getDocs, writeBatch } from '@angular/fire/firestore';
 import { Observable, BehaviorSubject, map, switchMap } from 'rxjs';
 
 export interface NewsItem {
@@ -28,14 +28,35 @@ export class NewsService {
     );
   }
 
-  addTopic(topic: string) {
+  async addTopic(topic: string) {
     const topicsRef = collection(this.firestore, 'topics');
-    return addDoc(topicsRef, { name: topic });
+    const docRef = await addDoc(topicsRef, { name: topic });
+    this.triggerGitHubAction();
+    return docRef;
   }
 
-  removeTopic(id: string) {
+  async removeTopic(id: string, name: string) {
+    // 1. Delete associated news
+    const newsRef = collection(this.firestore, 'news');
+    const q = query(newsRef, where('topic', '==', name));
+    const snapshot = await getDocs(q);
+    
+    if (!snapshot.empty) {
+      const batch = writeBatch(this.firestore);
+      snapshot.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      console.log(`Cleaned up ${snapshot.size} news items for topic: ${name}`);
+    }
+
+    // 2. Delete topic
     const topicDocRef = doc(this.firestore, `topics/${id}`);
     return deleteDoc(topicDocRef);
+  }
+
+  private triggerGitHubAction() {
+    console.log('GitHub Action trigger requested. (Note: Secure dispatch requires a backend or proxy to avoid exposing PAT)');
+    // TODO: If you have a secure endpoint to trigger the action, call it here.
+    // For now, the scheduled run (every 15m) will pick it up.
   }
 
   getNewsForTopics(topics: string[]): Observable<NewsItem[]> {
