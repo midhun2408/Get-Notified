@@ -25,20 +25,22 @@ async function runSearch() {
 
     console.log(`Searching for topics: ${allTopics.join(', ')}`);
 
-    for (const topic of allTopics) {
+    // Process all topics in parallel
+    await Promise.all(allTopics.map(async (topic) => {
       try {
         console.log(`Fetching news for: ${topic}`);
         const response = await axios.get(`https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&token=${GNEWS_API_KEY}&lang=en&max=3`);
         
         const articles = response.data.articles || [];
 
-        for (const article of articles) {
+        // Process articles for this topic in parallel
+        await Promise.all(articles.map(async (article) => {
           const articleHash = Buffer.from(article.url).toString('base64');
           const newsRef = db.collection('news').doc(articleHash);
           const doc = await newsRef.get();
 
           if (!doc.exists) {
-            console.log(`New article found: ${article.title}`);
+            console.log(`[${topic}] New article found: ${article.title}`);
             await newsRef.set({
               topic,
               title: article.title,
@@ -53,11 +55,11 @@ async function runSearch() {
             // Trigger Push Notification
             await sendNotification(topic, article.title);
           }
-        }
+        }));
       } catch (error) {
         console.error(`Error searching news for topic ${topic}:`, error.message);
       }
-    }
+    }));
   } catch (error) {
     console.error('Critical Error:', error.message);
   }
