@@ -20,17 +20,17 @@ export interface NewsItem {
 export class NewsService {
   constructor(private firestore: Firestore) {}
 
-  getTopics(): Observable<{id: string, name: string}[]> {
+  getTopics(): Observable<{id: string, name: string, status?: string}[]> {
     const topicsRef = collection(this.firestore, 'topics');
     const q = query(topicsRef, orderBy('name'));
     return collectionData(q, { idField: 'id' }).pipe(
-      map(docs => docs.map((d: any) => ({ id: d.id, name: d.name })))
+      map(docs => docs.map((d: any) => ({ id: d.id, name: d.name, status: d.status })))
     );
   }
 
   async addTopic(topic: string) {
     const topicsRef = collection(this.firestore, 'topics');
-    return await addDoc(topicsRef, { name: topic });
+    return await addDoc(topicsRef, { name: topic, status: 'pending' });
   }
 
   async removeTopic(id: string, name: string) {

@@ -36,7 +36,18 @@
     </div>
 
     <!-- Feed -->
-    <div class="space-y-6">
+    <div class="relative space-y-6 min-h-[300px]">
+      <!-- Overlay Loading State -->
+      <div *ngIf="isLoading" 
+           class="absolute inset-0 z-50 flex flex-col items-center justify-start pt-32 bg-gray-50/60 dark:bg-darkBg/60 backdrop-blur-sm transition-opacity duration-300">
+        <div class="flex flex-col items-center space-y-6">
+          <ion-spinner name="lines" class="text-neonBlue scale-125"></ion-spinner>
+          <span class="text-gray-900 dark:text-neonBlue font-mono text-xs font-bold tracking-[0.2em] animate-pulse uppercase bg-white/80 dark:bg-glassBg/80 px-4 py-2 rounded-full shadow-lg border border-gray-200 dark:border-neonBlue">
+            Syncing News Feed...
+          </span>
+        </div>
+      </div>
+
       <div *ngFor="let item of news" (click)="goToDetail(item.id)" class="relative group cursor-pointer">
         <div class="absolute -inset-0.5 bg-gradient-to-r from-neonBlue to-neonPurple rounded-2xl blur opacity-0 dark:opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
         <div class="relative bg-white dark:bg-[#0d0d14] rounded-2xl p-4 overflow-hidden shadow-md dark:shadow-2xl border border-gray-100 dark:border-glassBg flex flex-col items-start h-full transition-colors duration-300">
@@ -52,7 +63,7 @@
         </div>
       </div>
 
-      <div *ngIf="news.length === 0" class="text-center text-gray-400 mt-20 font-mono text-sm">
+      <div *ngIf="news.length === 0 && !isLoading" class="text-center text-gray-400 mt-20 font-mono text-sm">
         No transmissions found for selected topics.
       </div>
     </div>

@@ -37,7 +37,7 @@ export const searchNewsAI = functionsV1
  * Triggered when a new topic is added (Gen 1)
  */
 export const onTopicCreated = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onCreate(async (doc, context) => {
-  const { processTopic } = require("./logic");
+  const { processTopic, getDb } = require("./logic");
   const data = doc.data();
   const topicId = context.params.topicId;
   
@@ -51,6 +51,11 @@ export const onTopicCreated = functionsV1.region("us-central1").firestore.docume
   
   console.log(`[Trigger] Fetching news for topic: ${topicName}...`);
   await processTopic(topicName);
+  
+  // Mark topic as ready so the frontend knows news is available
+  const db = getDb();
+  await db.collection("topics").doc(topicId).update({ status: 'ready' });
+  console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
 
 /**

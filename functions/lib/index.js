@@ -337,7 +337,7 @@ var searchNewsAI = functionsV1.runWith({
   }
 });
 var onTopicCreated = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onCreate(async (doc, context) => {
-  const { processTopic: processTopic2 } = (init_logic(), __toCommonJS(logic_exports));
+  const { processTopic: processTopic2, getDb: getDb2 } = (init_logic(), __toCommonJS(logic_exports));
   const data = doc.data();
   const topicId = context.params.topicId;
   console.log(`[Trigger] onCreate fired for ID: ${topicId}. Data:`, JSON.stringify(data));
@@ -348,6 +348,9 @@ var onTopicCreated = functionsV1.region("us-central1").firestore.document("topic
   }
   console.log(`[Trigger] Fetching news for topic: ${topicName}...`);
   await processTopic2(topicName);
+  const db = getDb2();
+  await db.collection("topics").doc(topicId).update({ status: "ready" });
+  console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
 var onTopicDeleted = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onDelete(async (doc, context) => {
   const { getDb: getDb2 } = (init_logic(), __toCommonJS(logic_exports));
