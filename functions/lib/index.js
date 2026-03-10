@@ -4,6 +4,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -26,31 +29,27 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/index.ts
-var index_exports = {};
-__export(index_exports, {
-  onTopicCreated: () => onTopicCreated,
-  onTopicDeleted: () => onTopicDeleted,
-  searchNewsAI: () => searchNewsAI,
-  subscribeToTopic: () => subscribeToTopic2,
-  unsubscribeToTopic: () => unsubscribeToTopic
-});
-module.exports = __toCommonJS(index_exports);
-var functionsV1 = __toESM(require("firebase-functions/v1"));
-var admin2 = __toESM(require("firebase-admin"));
-
 // src/logic.ts
-var admin = __toESM(require("firebase-admin"));
-var https = __toESM(require("https"));
-var zlib = __toESM(require("zlib"));
-var crypto = __toESM(require("crypto"));
+var logic_exports = {};
+__export(logic_exports, {
+  TOPIC_FEEDS: () => TOPIC_FEEDS,
+  decodeArticleUrl: () => decodeArticleUrl,
+  fetchArticleData: () => fetchArticleData,
+  fetchWithRedirects: () => fetchWithRedirects,
+  getAdmin: () => getAdmin,
+  getDb: () => getDb,
+  getParser: () => getParser,
+  processTopic: () => processTopic,
+  sendNotification: () => sendNotification,
+  subscribeToTopic: () => subscribeToTopic,
+  unsubscribeFromTopic: () => unsubscribeFromTopic
+});
 function getAdmin() {
   return admin;
 }
 function getDb() {
   return admin.firestore();
 }
-var _parser;
 function getParser() {
   if (!_parser) {
     const Parser = require("rss-parser");
@@ -176,35 +175,29 @@ async function fetchArticleData(url) {
     return { description: null, imageUrl: null };
   }
 }
-var TOPIC_FEEDS = {
-  "Kerala": [
-    "https://www.thehindu.com/news/national/kerala/feeder/default.rss",
-    "https://www.onmanorama.com/rss/news.xml"
-  ],
-  "India": [
-    "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
-    "https://www.thehindu.com/news/national/feeder/default.rss"
-  ],
-  "World": [
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://timesofindia.indiatimes.com/rssfeeds/29473334.cms"
-  ],
-  "Technology": [
-    "https://gadgets360.com/rss/feeds"
-  ]
-};
 async function processTopic(topic) {
   try {
     const db = getDb();
     const parser = getParser();
-    console.log(`--- Processing topic: ${topic} ---`);
+    const topicQuery = await db.collection("topics").where("name", "==", topic).limit(1).get();
+    let lastProcessedTime = 0;
+    let topicDocRef = null;
+    if (!topicQuery.empty) {
+      const topicDoc = topicQuery.docs[0];
+      topicDocRef = topicDoc.ref;
+      const data = topicDoc.data();
+      if (data.lastProcessedTime) {
+        lastProcessedTime = new Date(data.lastProcessedTime).getTime();
+      }
+    }
+    console.log(`--- Processing topic: ${topic} (Last Processed: ${lastProcessedTime ? new Date(lastProcessedTime).toISOString() : "Never"}) ---`);
     let items = [];
     if (TOPIC_FEEDS[topic]) {
       console.log(`Using direct publisher feeds for ${topic}`);
       for (const url of TOPIC_FEEDS[topic]) {
         try {
           const feed = await parser.parseURL(url);
-          items = items.concat(feed.items.slice(0, 5));
+          items = items.concat(feed.items.slice(0, 10));
         } catch (e) {
           console.error(`Error fetching direct feed ${url}:`, e.message);
         }
@@ -214,14 +207,24 @@ async function processTopic(topic) {
       const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
       try {
         const feed = await parser.parseURL(feedUrl);
-        items = feed.items.slice(0, 5);
+        items = feed.items.slice(0, 10);
       } catch (e) {
         console.error(`Error fetching Bing News for ${topic}:`, e.message);
       }
     }
     if (items.length === 0) return;
+    items.sort((a, b) => {
+      const timeA = new Date(a.pubDate || 0).getTime();
+      const timeB = new Date(b.pubDate || 0).getTime();
+      return timeA - timeB;
+    });
+    let latestTimeInThisBatch = lastProcessedTime;
     for (const article of items) {
       if (!article.link || !article.title) continue;
+      const articleTime = new Date(article.pubDate || 0).getTime();
+      if (lastProcessedTime > 0 && articleTime <= lastProcessedTime) {
+        continue;
+      }
       const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
       const newsRef = db.collection("news").doc(articleHash);
       const doc = await newsRef.get();
@@ -273,8 +276,21 @@ async function processTopic(topic) {
           timestamp: getAdmin().firestore.FieldValue.serverTimestamp()
         });
         await sendNotification(topic, displayTitle, imageUrl);
+        if (articleTime > latestTimeInThisBatch) {
+          latestTimeInThisBatch = articleTime;
+        }
         await new Promise((r) => setTimeout(r, 1e3 + Math.random() * 1500));
+      } else {
+        if (articleTime > latestTimeInThisBatch) {
+          latestTimeInThisBatch = articleTime;
+        }
       }
+    }
+    if (topicDocRef && latestTimeInThisBatch > lastProcessedTime) {
+      await topicDocRef.update({
+        lastProcessedTime: new Date(latestTimeInThisBatch).toISOString()
+      });
+      console.log(`[${topic}] Updated lastProcessedTime to ${new Date(latestTimeInThisBatch).toISOString()}`);
     }
   } catch (error) {
     console.error(`Error in processTopic for ${topic}:`, error.message);
@@ -324,8 +340,45 @@ async function unsubscribeFromTopic(token, topic) {
     return { success: false, error: error.message };
   }
 }
+var admin, https, zlib, crypto, _parser, TOPIC_FEEDS;
+var init_logic = __esm({
+  "src/logic.ts"() {
+    admin = __toESM(require("firebase-admin"));
+    https = __toESM(require("https"));
+    zlib = __toESM(require("zlib"));
+    crypto = __toESM(require("crypto"));
+    TOPIC_FEEDS = {
+      "Kerala": [
+        "https://www.thehindu.com/news/national/kerala/feeder/default.rss",
+        "https://www.onmanorama.com/rss/news.xml"
+      ],
+      "India": [
+        "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
+        "https://www.thehindu.com/news/national/feeder/default.rss"
+      ],
+      "World": [
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "https://timesofindia.indiatimes.com/rssfeeds/29473334.cms"
+      ],
+      "Technology": [
+        "https://gadgets360.com/rss/feeds"
+      ]
+    };
+  }
+});
 
 // src/index.ts
+var index_exports = {};
+__export(index_exports, {
+  onTopicCreated: () => onTopicCreated,
+  onTopicDeleted: () => onTopicDeleted,
+  searchNewsAI: () => searchNewsAI,
+  subscribeToTopic: () => subscribeToTopic2,
+  unsubscribeToTopic: () => unsubscribeToTopic
+});
+module.exports = __toCommonJS(index_exports);
+var functionsV1 = __toESM(require("firebase-functions/v1"));
+var admin2 = __toESM(require("firebase-admin"));
 if (admin2.apps.length === 0) {
   admin2.initializeApp();
 }
@@ -333,8 +386,9 @@ var searchNewsAI = functionsV1.runWith({
   timeoutSeconds: 540,
   memory: "512MB"
 }).region("us-central1").pubsub.schedule("*/10 * * * *").onRun(async (context) => {
+  const { getDb: getDb2, processTopic: processTopic2 } = (init_logic(), __toCommonJS(logic_exports));
   try {
-    const db = getDb();
+    const db = getDb2();
     const topicsSnapshot = await db.collection("topics").get();
     const allTopics = topicsSnapshot.docs.map((doc) => doc.data().name);
     if (allTopics.length === 0) {
@@ -343,13 +397,14 @@ var searchNewsAI = functionsV1.runWith({
     }
     console.log(`Starting scheduled news search for ${allTopics.length} topics...`);
     for (const topic of allTopics) {
-      await processTopic(topic);
+      await processTopic2(topic);
     }
   } catch (error) {
     console.error("Critical error in searchNewsAI function:", error);
   }
 });
 var onTopicCreated = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onCreate(async (doc, context) => {
+  const { getDb: getDb2, processTopic: processTopic2 } = (init_logic(), __toCommonJS(logic_exports));
   const data = doc.data();
   const topicId = context.params.topicId;
   console.log(`[Trigger] onCreate fired for ID: ${topicId}. Data:`, JSON.stringify(data));
@@ -359,12 +414,13 @@ var onTopicCreated = functionsV1.region("us-central1").firestore.document("topic
     return;
   }
   console.log(`[Trigger] Fetching news for topic: ${topicName}...`);
-  await processTopic(topicName);
-  const db = getDb();
+  await processTopic2(topicName);
+  const db = getDb2();
   await db.collection("topics").doc(topicId).update({ status: "ready" });
   console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
 var onTopicDeleted = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onDelete(async (doc, context) => {
+  const { getDb: getDb2 } = (init_logic(), __toCommonJS(logic_exports));
   const data = doc.data();
   const topicId = context.params.topicId;
   const topicName = data?.name || topicId;
@@ -373,7 +429,7 @@ var onTopicDeleted = functionsV1.region("us-central1").firestore.document("topic
     console.error(`[Trigger] Could not determine topic name for ${topicId}`);
     return;
   }
-  const db = getDb();
+  const db = getDb2();
   const newsRef = db.collection("news");
   const q = newsRef.where("topic", "==", topicName);
   const snapshot = await q.get();
@@ -384,18 +440,20 @@ var onTopicDeleted = functionsV1.region("us-central1").firestore.document("topic
   console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
 var subscribeToTopic2 = functionsV1.region("us-central1").https.onCall(async (data, context) => {
+  const { subscribeToTopic: logicSubscribe } = (init_logic(), __toCommonJS(logic_exports));
   const { token, topic } = data;
   if (!token || !topic) {
     throw new functionsV1.https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
   }
-  return await subscribeToTopic(token, topic);
+  return await logicSubscribe(token, topic);
 });
 var unsubscribeToTopic = functionsV1.region("us-central1").https.onCall(async (data, context) => {
+  const { unsubscribeFromTopic: logicUnsubscribe } = (init_logic(), __toCommonJS(logic_exports));
   const { token, topic } = data;
   if (!token || !topic) {
     throw new functionsV1.https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
   }
-  return await unsubscribeFromTopic(token, topic);
+  return await logicUnsubscribe(token, topic);
 });
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

@@ -200,7 +200,22 @@ export async function processTopic(topic: string) {
   try {
     const db = getDb();
     const parser = getParser();
-    console.log(`--- Processing topic: ${topic} ---`);
+    
+    // Get last processing time for this topic to avoid duplicates
+    const topicQuery = await db.collection("topics").where("name", "==", topic).limit(1).get();
+    let lastProcessedTime = 0;
+    let topicDocRef: admin.firestore.DocumentReference | null = null;
+    
+    if (!topicQuery.empty) {
+      const topicDoc = topicQuery.docs[0];
+      topicDocRef = topicDoc.ref;
+      const data = topicDoc.data();
+      if (data.lastProcessedTime) {
+        lastProcessedTime = new Date(data.lastProcessedTime).getTime();
+      }
+    }
+
+    console.log(`--- Processing topic: ${topic} (Last Processed: ${lastProcessedTime ? new Date(lastProcessedTime).toISOString() : 'Never'}) ---`);
     let items: any[] = [];
     
     if (TOPIC_FEEDS[topic]) {
@@ -208,7 +223,7 @@ export async function processTopic(topic: string) {
         for (const url of TOPIC_FEEDS[topic]) {
             try {
                 const feed = await parser.parseURL(url);
-                items = items.concat(feed.items.slice(0, 5));
+                items = items.concat(feed.items.slice(0, 10)); // Increased slightly to catch more new stuff
             } catch (e: any) {
                 console.error(`Error fetching direct feed ${url}:`, e.message);
             }
@@ -218,7 +233,7 @@ export async function processTopic(topic: string) {
         const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
         try {
             const feed = await parser.parseURL(feedUrl);
-            items = feed.items.slice(0, 5);
+            items = feed.items.slice(0, 10);
         } catch (e: any) {
             console.error(`Error fetching Bing News for ${topic}:`, e.message);
         }
@@ -226,8 +241,24 @@ export async function processTopic(topic: string) {
 
     if (items.length === 0) return;
 
+    // Sort items by date ascending (oldest first)
+    items.sort((a, b) => {
+      const timeA = new Date(a.pubDate || 0).getTime();
+      const timeB = new Date(b.pubDate || 0).getTime();
+      return timeA - timeB;
+    });
+
+    let latestTimeInThisBatch = lastProcessedTime;
+
     for (const article of items) {
       if (!article.link || !article.title) continue;
+
+      const articleTime = new Date(article.pubDate || 0).getTime();
+      
+      // SKIP if article is older than or equal to what we've already processed
+      if (lastProcessedTime > 0 && articleTime <= lastProcessedTime) {
+        continue;
+      }
 
       const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
       const newsRef = db.collection("news").doc(articleHash);
@@ -288,9 +319,29 @@ export async function processTopic(topic: string) {
         });
 
         await sendNotification(topic, displayTitle, imageUrl);
+        
+        // Update tracking time
+        if (articleTime > latestTimeInThisBatch) {
+          latestTimeInThisBatch = articleTime;
+        }
+
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
+      } else {
+        // If doc exists but articleTime is newer, still update tracking (though this shouldn't happen much with link hash)
+        if (articleTime > latestTimeInThisBatch) {
+          latestTimeInThisBatch = articleTime;
+        }
       }
     }
+
+    // Update topic document with the latest processed timestamp
+    if (topicDocRef && latestTimeInThisBatch > lastProcessedTime) {
+      await topicDocRef.update({
+        lastProcessedTime: new Date(latestTimeInThisBatch).toISOString()
+      });
+      console.log(`[${topic}] Updated lastProcessedTime to ${new Date(latestTimeInThisBatch).toISOString()}`);
+    }
+
   } catch (error: any) {
     console.error(`Error in processTopic for ${topic}:`, error.message);
   }
