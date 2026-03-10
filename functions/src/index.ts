@@ -1,8 +1,11 @@
 import * as functionsV1 from "firebase-functions/v1";
 import * as admin from "firebase-admin";
+import { getDb, processTopic, subscribeToTopic as logicSubscribe, unsubscribeFromTopic as logicUnsubscribe } from "./logic";
 
 // Initialize at the top level to ensure the default app is always available
-admin.initializeApp();
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 
 export const searchNewsAI = functionsV1
   .runWith({
@@ -13,7 +16,6 @@ export const searchNewsAI = functionsV1
   .pubsub
   .schedule("*/10 * * * *")
   .onRun(async (context) => {
-    const { getDb, processTopic } = require("./logic");
     try {
       const db = getDb();
       const topicsSnapshot = await db.collection("topics").get();
@@ -37,7 +39,6 @@ export const searchNewsAI = functionsV1
  * Triggered when a new topic is added (Gen 1)
  */
 export const onTopicCreated = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onCreate(async (doc, context) => {
-  const { processTopic, getDb } = require("./logic");
   const data = doc.data();
   const topicId = context.params.topicId;
   
@@ -62,7 +63,6 @@ export const onTopicCreated = functionsV1.region("us-central1").firestore.docume
  * Triggered when a topic is deleted (Gen 1)
  */
 export const onTopicDeleted = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onDelete(async (doc, context) => {
-  const { getDb } = require("./logic");
   const data = doc.data();
   const topicId = context.params.topicId;
   const topicName = data?.name || topicId;
@@ -85,4 +85,30 @@ export const onTopicDeleted = functionsV1.region("us-central1").firestore.docume
   snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
   await batch.commit();
   console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
+});
+
+/**
+ * Callable function to subscribe a device to a topic
+ */
+export const subscribeToTopic = functionsV1.region("us-central1").https.onCall(async (data, context) => {
+  const { token, topic } = data;
+  
+  if (!token || !topic) {
+    throw new functionsV1.https.HttpsError('invalid-argument', 'The function must be called with a token and topic.');
+  }
+
+  return await logicSubscribe(token, topic);
+});
+
+/**
+ * Callable function to unsubscribe a device from a topic
+ */
+export const unsubscribeToTopic = functionsV1.region("us-central1").https.onCall(async (data, context) => {
+  const { token, topic } = data;
+  
+  if (!token || !topic) {
+    throw new functionsV1.https.HttpsError('invalid-argument', 'The function must be called with a token and topic.');
+  }
+
+  return await logicUnsubscribe(token, topic);
 });

@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { NewsService } from '../services/news.service';
 import { ThemeService } from '../services/theme.service';
+import { NotificationService } from '../services/notification.service';
 
 @Component({
   selector: 'app-topics',
@@ -15,7 +16,8 @@ export class TopicsComponent  implements OnInit {
   constructor(
     private newsService: NewsService, 
     private router: Router,
-    public themeService: ThemeService
+    public themeService: ThemeService,
+    private notificationService: NotificationService
   ) { }
 
   ngOnInit() {
@@ -24,15 +26,18 @@ export class TopicsComponent  implements OnInit {
     });
   }
 
-  addTopic() {
+  async addTopic() {
     if (this.newTopic.trim()) {
-      this.newsService.addTopic(this.newTopic.trim());
+      const topicName = this.newTopic.trim();
+      await this.newsService.addTopic(topicName);
+      await this.notificationService.subscribe(topicName);
       this.newTopic = '';
     }
   }
 
-  removeTopic(id: string, name: string) {
-    this.newsService.removeTopic(id, name);
+  async removeTopic(id: string, name: string) {
+    await this.newsService.removeTopic(id, name);
+    await this.notificationService.unsubscribe(name);
   }
 
   goBack() {

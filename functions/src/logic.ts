@@ -287,7 +287,7 @@ export async function processTopic(topic: string) {
           timestamp: getAdmin().firestore.FieldValue.serverTimestamp()
         });
 
-        await sendNotification(topic, displayTitle);
+        await sendNotification(topic, displayTitle, imageUrl);
         await new Promise(r => setTimeout(r, 1000 + Math.random() * 1500));
       }
     }
@@ -296,22 +296,52 @@ export async function processTopic(topic: string) {
   }
 }
 
-export async function sendNotification(topic: string, title: string) {
+export async function sendNotification(topic: string, title: string, imageUrl?: string | null) {
   const admin = getAdmin();
   if (admin.apps.length === 0) admin.initializeApp();
   
-  const payload = {
+  const payload: any = {
     notification: {
-      title: `Match found for: ${topic}`,
+      title: `News Update: ${topic}`,
       body: title,
     },
     topic: topic.replace(/\s+/g, "_")
   };
 
+  if (imageUrl) {
+    payload.notification.imageUrl = imageUrl;
+  }
+
   try {
     await admin.messaging().send(payload);
-    console.log(`Notification sent for topic: ${topic}`);
+    console.log(`Notification sent for topic: ${topic} with image: ${imageUrl ? 'YES' : 'NO'}`);
   } catch (error) {
     console.error("Error sending notification:", error);
+  }
+}
+
+export async function subscribeToTopic(token: string, topic: string) {
+  const admin = getAdmin();
+  const topicName = topic.replace(/\s+/g, "_");
+  try {
+    await admin.messaging().subscribeToTopic(token, topicName);
+    console.log(`Successfully subscribed token to topic: ${topicName}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`Error subscribing to topic ${topicName}:`, error);
+    return { success: false, error: (error as any).message };
+  }
+}
+
+export async function unsubscribeFromTopic(token: string, topic: string) {
+  const admin = getAdmin();
+  const topicName = topic.replace(/\s+/g, "_");
+  try {
+    await admin.messaging().unsubscribeFromTopic(token, topicName);
+    console.log(`Successfully unsubscribed token from topic: ${topicName}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`Error unsubscribing from topic ${topicName}:`, error);
+    return { success: false, error: (error as any).message };
   }
 }

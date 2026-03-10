@@ -13,6 +13,7 @@ import { NewsDetailComponent } from './news-detail/news-detail.component';
 import { provideFirebaseApp, initializeApp } from '@angular/fire/app';
 import { provideFirestore, getFirestore } from '@angular/fire/firestore';
 import { provideMessaging, getMessaging } from '@angular/fire/messaging';
+import { provideFunctions, getFunctions } from '@angular/fire/functions';
 
 const firebaseConfig = {
   apiKey: "AIzaSyAiSws0O_xPPadO3sFKpcNntYgJGYAnx5A",
@@ -38,7 +39,8 @@ const firebaseConfig = {
     IonicModule.forRoot({}),
     provideFirebaseApp(() => initializeApp(firebaseConfig)),
     provideFirestore(() => getFirestore()),
-    provideMessaging(() => getMessaging())
+    provideMessaging(() => getMessaging()),
+    provideFunctions(() => getFunctions())
   ],
   providers: [],
   bootstrap: [AppComponent]
