@@ -1,13 +1,14 @@
 import * as admin from "firebase-admin";
-import * as https from "https";
-import * as zlib from "zlib";
-import * as crypto from "crypto";
+// Removed top-level imports to speed up initialization
+
 
 export function getAdmin() {
+  const admin = require("firebase-admin");
   return admin;
 }
 
 export function getDb() {
+  const admin = require("firebase-admin");
   return admin.firestore();
 }
 
@@ -26,7 +27,7 @@ export function getParser() {
 export function decodeArticleUrl(encodedUrl: string): string {
   try {
     const url = new URL(encodedUrl);
-    
+
     // Handle Bing News RSS URLs
     if (url.hostname.includes('bing.com')) {
       const realUrl = url.searchParams.get('url');
@@ -38,12 +39,12 @@ export function decodeArticleUrl(encodedUrl: string): string {
       const pathParts = url.pathname.split('/');
       let base64Str = pathParts[pathParts.length - 1] || pathParts[pathParts.length - 2];
       if (base64Str) base64Str = base64Str.split('?')[0];
-      
+
       if (!base64Str) return encodedUrl;
 
       const normalized = base64Str.replace(/-/g, '+').replace(/_/g, '/');
       const buffer = Buffer.from(normalized, 'base64');
-      
+
       const encodings = ['binary', 'utf8', 'ascii'] as const;
       for (const enc of encodings) {
         const text = buffer.toString(enc);
@@ -51,7 +52,7 @@ export function decodeArticleUrl(encodedUrl: string): string {
         if (matches && matches.length > 0) {
           const filtered = matches.filter(m => !m.includes('google.com'));
           if (filtered.length > 0) {
-             return filtered.sort((a, b) => b.length - a.length)[0];
+            return filtered.sort((a, b) => b.length - a.length)[0];
           }
         }
       }
@@ -64,6 +65,8 @@ export function decodeArticleUrl(encodedUrl: string): string {
  * Helper to fetch HTML while following redirects with browser-like headers
  */
 export function fetchWithRedirects(url: string, depth = 0): Promise<string | null> {
+  const https = require("https");
+  const zlib = require("zlib");
   return new Promise((resolve) => {
     if (depth > 5) return resolve(null);
 
@@ -92,7 +95,7 @@ export function fetchWithRedirects(url: string, depth = 0): Promise<string | nul
       timeout: 10000
     };
 
-    https.get(url, options, (res) => {
+    https.get(url, options, (res: any) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         const nextUrl = new URL(res.headers.location, url).href;
         return resolve(fetchWithRedirects(nextUrl, depth + 1));
@@ -102,7 +105,7 @@ export function fetchWithRedirects(url: string, depth = 0): Promise<string | nul
         console.log(`[Cloud Function Enrichment] Failed to fetch ${url} - Status: ${res.statusCode}`);
         return resolve(null);
       }
-      
+
       let stream: any = res;
       const encoding = res.headers['content-encoding'];
       if (encoding === 'gzip') {
@@ -118,7 +121,7 @@ export function fetchWithRedirects(url: string, depth = 0): Promise<string | nul
         console.log(`[Cloud Function Enrichment] Stream error on ${url}: ${e.message}`);
         resolve(null);
       });
-    }).on('error', (e) => {
+    }).on('error', (e: any) => {
       console.log(`[Cloud Function Enrichment] Error fetching ${url}: ${e.message}`);
       resolve(null);
     });
@@ -136,9 +139,9 @@ export async function fetchArticleData(url: string): Promise<{ description: stri
 
     const googleMatch = html.match(/<a[^>]*rel="nofollow"[^>]*href="([^"]*)"/i);
     if (googleMatch) {
-        const intermediateUrl = googleMatch[1];
-        html = await fetchWithRedirects(intermediateUrl);
-        if (!html) return { description: null, imageUrl: null };
+      const intermediateUrl = googleMatch[1];
+      html = await fetchWithRedirects(intermediateUrl);
+      if (!html) return { description: null, imageUrl: null };
     }
 
     const paragraphs = html.match(/<p[^>]*>([\s\S]*?)<\/p>/gi);
@@ -147,13 +150,13 @@ export async function fetchArticleData(url: string): Promise<{ description: stri
       const cleanParagraphs = paragraphs
         .map(p => p.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').trim())
         .filter(p => {
-            return p.length > 120 && 
-                   !p.includes('{') && 
-                   !p.toLowerCase().includes('subscribe') && 
-                   !p.toLowerCase().includes('sign in') &&
-                   !p.toLowerCase().includes('weather') &&
-                   !p.toLowerCase().includes('epaper') &&
-                   !p.toLowerCase().includes('copyright');
+          return p.length > 120 &&
+            !p.includes('{') &&
+            !p.toLowerCase().includes('subscribe') &&
+            !p.toLowerCase().includes('sign in') &&
+            !p.toLowerCase().includes('weather') &&
+            !p.toLowerCase().includes('epaper') &&
+            !p.toLowerCase().includes('copyright');
         });
 
       if (cleanParagraphs.length > 0) {
@@ -166,7 +169,7 @@ export async function fetchArticleData(url: string): Promise<{ description: stri
     let imageUrl = (ogImageMatch ? ogImageMatch[1] : (twitterImageMatch ? twitterImageMatch[1] : null));
 
     if (imageUrl && (imageUrl.includes('googleusercontent.com') || imageUrl.includes('gstatic.com') || imageUrl.includes('google.com/news'))) {
-        imageUrl = null;
+      imageUrl = null;
     }
 
     return { description, imageUrl };
@@ -200,12 +203,12 @@ export async function processTopic(topic: string) {
   try {
     const db = getDb();
     const parser = getParser();
-    
+
     // Get last processing time for this topic to avoid duplicates
     const topicQuery = await db.collection("topics").where("name", "==", topic).limit(1).get();
     let lastProcessedTime = 0;
     let topicDocRef: admin.firestore.DocumentReference | null = null;
-    
+
     if (!topicQuery.empty) {
       const topicDoc = topicQuery.docs[0];
       topicDocRef = topicDoc.ref;
@@ -217,26 +220,26 @@ export async function processTopic(topic: string) {
 
     console.log(`--- Processing topic: ${topic} (Last Processed: ${lastProcessedTime ? new Date(lastProcessedTime).toISOString() : 'Never'}) ---`);
     let items: any[] = [];
-    
+
     if (TOPIC_FEEDS[topic]) {
-        console.log(`Using direct publisher feeds for ${topic}`);
-        for (const url of TOPIC_FEEDS[topic]) {
-            try {
-                const feed = await parser.parseURL(url);
-                items = items.concat(feed.items.slice(0, 10)); // Increased slightly to catch more new stuff
-            } catch (e: any) {
-                console.error(`Error fetching direct feed ${url}:`, e.message);
-            }
-        }
-    } else {
-        console.log(`No direct feed for ${topic}, falling back to Bing News RSS`);
-        const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
+      console.log(`Using direct publisher feeds for ${topic}`);
+      for (const url of TOPIC_FEEDS[topic]) {
         try {
-            const feed = await parser.parseURL(feedUrl);
-            items = feed.items.slice(0, 10);
+          const feed = await parser.parseURL(url);
+          items = items.concat(feed.items.slice(0, 10)); // Increased slightly to catch more new stuff
         } catch (e: any) {
-            console.error(`Error fetching Bing News for ${topic}:`, e.message);
+          console.error(`Error fetching direct feed ${url}:`, e.message);
         }
+      }
+    } else {
+      console.log(`No direct feed for ${topic}, falling back to Bing News RSS`);
+      const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topic)}&format=rss`;
+      try {
+        const feed = await parser.parseURL(feedUrl);
+        items = feed.items.slice(0, 10);
+      } catch (e: any) {
+        console.error(`Error fetching Bing News for ${topic}:`, e.message);
+      }
     }
 
     if (items.length === 0) return;
@@ -254,12 +257,13 @@ export async function processTopic(topic: string) {
       if (!article.link || !article.title) continue;
 
       const articleTime = new Date(article.pubDate || 0).getTime();
-      
+
       // SKIP if article is older than or equal to what we've already processed
       if (lastProcessedTime > 0 && articleTime <= lastProcessedTime) {
         continue;
       }
 
+      const crypto = require("crypto");
       const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
       const newsRef = db.collection("news").doc(articleHash);
       const doc = await newsRef.get();
@@ -268,37 +272,37 @@ export async function processTopic(topic: string) {
         let source = "News";
         let displayTitle = article.title;
         let description = article.contentSnippet || article.description || article.content || "";
-        
+
         description = description.replace(/<[^>]*>?/gm, '').trim();
 
         if (article.source && article.source.name) {
-            source = article.source.name;
+          source = article.source.name;
         } else {
-            const splitIndex = article.title.lastIndexOf(" - ");
-            if (splitIndex !== -1) {
-                source = article.title.substring(splitIndex + 3);
-                displayTitle = article.title.substring(0, splitIndex);
-            } else {
-                try {
-                    const urlObj = new URL(article.link);
-                    source = urlObj.hostname.replace('www.', '').split('.')[0];
-                    source = source.charAt(0).toUpperCase() + source.slice(1);
-                } catch(e) {}
-            }
+          const splitIndex = article.title.lastIndexOf(" - ");
+          if (splitIndex !== -1) {
+            source = article.title.substring(splitIndex + 3);
+            displayTitle = article.title.substring(0, splitIndex);
+          } else {
+            try {
+              const urlObj = new URL(article.link);
+              source = urlObj.hostname.replace('www.', '').split('.')[0];
+              source = source.charAt(0).toUpperCase() + source.slice(1);
+            } catch (e) { }
+          }
         }
 
         if (description.includes("Comprehensive up-to-date")) {
-            description = displayTitle; 
+          description = displayTitle;
         }
 
         console.log(`[${topic}] Processing story: ${displayTitle}`);
         let imageUrl: string | null = null;
         const content = (article as any).content || article.contentSnippet || "";
         if (content) {
-            const imgMatch = content.match(/<img[^>]*src="([^"]*)"/i);
-            if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
-                imageUrl = imgMatch[1];
-            }
+          const imgMatch = content.match(/<img[^>]*src="([^"]*)"/i);
+          if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
+            imageUrl = imgMatch[1];
+          }
         }
 
         const articleData = await fetchArticleData(article.link);
@@ -306,7 +310,7 @@ export async function processTopic(topic: string) {
         if (articleData.imageUrl) imageUrl = articleData.imageUrl;
 
         console.log(`[${topic}] New article found: ${displayTitle} (${source}) - Image: ${imageUrl ? 'YES' : 'NO'}`);
-        
+
         await newsRef.set({
           topic,
           title: displayTitle,
@@ -318,8 +322,12 @@ export async function processTopic(topic: string) {
           timestamp: getAdmin().firestore.FieldValue.serverTimestamp()
         });
 
-        await sendNotification(topic, displayTitle, imageUrl);
-        
+        await sendNotification(topic, displayTitle, imageUrl, {
+          id: articleHash,
+          url: article.link,
+          source: source
+        });
+
         // Update tracking time
         if (articleTime > latestTimeInThisBatch) {
           latestTimeInThisBatch = articleTime;
@@ -347,25 +355,37 @@ export async function processTopic(topic: string) {
   }
 }
 
-export async function sendNotification(topic: string, title: string, imageUrl?: string | null) {
+export async function sendNotification(topic: string, title: string, imageUrl?: string | null, metadata?: any) {
   const admin = getAdmin();
   if (admin.apps.length === 0) admin.initializeApp();
-  
+
+  const topicName = topic.replace(/\s+/g, "_");
   const payload: any = {
     notification: {
       title: `News Update: ${topic}`,
       body: title,
     },
-    topic: topic.replace(/\s+/g, "_")
+    data: {
+      topic: topic,
+      title: title,
+    },
+    topic: topicName
   };
 
   if (imageUrl) {
-    payload.notification.imageUrl = imageUrl;
+    payload.notification.image = imageUrl; // Use standard 'image' field for FCM
+    payload.data.imageUrl = imageUrl;
+  }
+
+  if (metadata) {
+    if (metadata.id) payload.data.id = metadata.id;
+    if (metadata.url) payload.data.url = metadata.url;
+    if (metadata.source) payload.data.source = metadata.source;
   }
 
   try {
-    await admin.messaging().send(payload);
-    console.log(`Notification sent for topic: ${topic} with image: ${imageUrl ? 'YES' : 'NO'}`);
+    const response = await admin.messaging().send(payload);
+    console.log(`Notification sent for topic: ${topic} (Message ID: ${response})`);
   } catch (error) {
     console.error("Error sending notification:", error);
   }

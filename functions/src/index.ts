@@ -1,88 +1,92 @@
-import * as functionsV1 from "firebase-functions/v1";
-import * as admin from "firebase-admin";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { setGlobalOptions } from "firebase-functions/v2";
+import { initializeApp, getApps } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import * as logic from "./logic";
 
-// Initialize at the top level to ensure the default app is always available
-if (admin.apps.length === 0) {
-  admin.initializeApp();
+// Set global options for all functions
+setGlobalOptions({ region: "us-central1" });
+
+// Initialize admin on load
+if (getApps().length === 0) {
+  initializeApp();
 }
 
-export const searchNewsAI = functionsV1
-  .runWith({
-    timeoutSeconds: 540,
-    memory: "512MB"
-  })
-  .region("us-central1")
-  .pubsub
-  .schedule("*/10 * * * *")
-  .onRun(async (context) => {
-    const { getDb, processTopic } = require("./logic");
-    try {
-      const db = getDb();
-      const topicsSnapshot = await db.collection("topics").get();
-      const allTopics = topicsSnapshot.docs.map((doc: any) => doc.data().name);
+/**
+ * Scheduled function to search for news using AI and RSS (Gen 2)
+ */
+export const searchnewsai = onSchedule({
+  schedule: "*/10 * * * *",
+  timeoutSeconds: 540,
+  memory: "512MiB",
+}, async (event) => {
+  try {
+    const db = getFirestore();
+    const topicsSnapshot = await db.collection("topics").get();
+    const allTopics = topicsSnapshot.docs.map((doc: any) => doc.data().name);
 
-      if (allTopics.length === 0) {
-        console.log("No topics found in Firestore.");
-        return;
-      }
-
-      console.log(`Starting scheduled news search for ${allTopics.length} topics...`);
-      for (const topic of allTopics) {
-        await processTopic(topic);
-      }
-    } catch (error) {
-      console.error("Critical error in searchNewsAI function:", error);
+    if (allTopics.length === 0) {
+      console.log("No topics found in Firestore.");
+      return;
     }
-  });
+
+    console.log(`Starting scheduled news search for ${allTopics.length} topics...`);
+    for (const topic of allTopics) {
+      await logic.processTopic(topic);
+    }
+  } catch (error) {
+    console.error("Critical error in searchnewsai function:", error);
+  }
+});
 
 /**
- * Triggered when a new topic is added (Gen 1)
+ * Triggered when a new topic is added (Gen 2)
  */
-export const onTopicCreated = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onCreate(async (doc, context) => {
-  const { getDb, processTopic } = require("./logic");
-  const data = doc.data();
-  const topicId = context.params.topicId;
-  
+export const ontopiccreated = onDocumentCreated("topics/{topicId}", async (event) => {
+  const data = event.data?.data();
+  const topicId = event.params.topicId;
+
   console.log(`[Trigger] onCreate fired for ID: ${topicId}. Data:`, JSON.stringify(data));
-  
+
   const topicName = data?.name || topicId;
   if (!topicName) {
     console.error(`[Trigger] Could not determine topic name for ${topicId}`);
     return;
   }
-  
+
   console.log(`[Trigger] Fetching news for topic: ${topicName}...`);
-  await processTopic(topicName);
-  
+  await logic.processTopic(topicName);
+
   // Mark topic as ready so the frontend knows news is available
-  const db = getDb();
+  const db = getFirestore();
   await db.collection("topics").doc(topicId).update({ status: 'ready' });
   console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
 
 /**
- * Triggered when a topic is deleted (Gen 1)
+ * Triggered when a topic is deleted (Gen 2)
  */
-export const onTopicDeleted = functionsV1.region("us-central1").firestore.document("topics/{topicId}").onDelete(async (doc, context) => {
-  const { getDb } = require("./logic");
-  const data = doc.data();
-  const topicId = context.params.topicId;
+export const ontopicdeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
+  const data = event.data?.data();
+  const topicId = event.params.topicId;
   const topicName = data?.name || topicId;
-  
+
   console.log(`[Trigger] onDelete fired for ID: ${topicId}. Determined topic: ${topicName}`);
-  
+
   if (!topicName) {
     console.error(`[Trigger] Could not determine topic name for ${topicId}`);
     return;
   }
-  
-  const db = getDb();
+
+  const db = getFirestore();
   const newsRef = db.collection("news");
   const q = newsRef.where("topic", "==", topicName);
   const snapshot = await q.get();
-  
+
   if (snapshot.empty) return;
-  
+
   const batch = db.batch();
   snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
   await batch.commit();
@@ -90,29 +94,25 @@ export const onTopicDeleted = functionsV1.region("us-central1").firestore.docume
 });
 
 /**
- * Callable function to subscribe a device to a topic
+ * Callable function to subscribe a device to a topic (Gen 2)
  */
-export const subscribeToTopic = functionsV1.region("us-central1").https.onCall(async (data, context) => {
-  const { subscribeToTopic: logicSubscribe } = require("./logic");
-  const { token, topic } = data;
-  
-  if (!token || !topic) {
-    throw new functionsV1.https.HttpsError('invalid-argument', 'The function must be called with a token and topic.');
+export const subscribetotopic = onCall(async (request) => {
+  const { data } = request;
+  if (!data || !data.token || !data.topic) {
+    throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');
   }
 
-  return await logicSubscribe(token, topic);
+  return await logic.subscribeToTopic(data.token, data.topic);
 });
 
 /**
- * Callable function to unsubscribe a device from a topic
+ * Callable function to unsubscribe a device from a topic (Gen 2)
  */
-export const unsubscribeToTopic = functionsV1.region("us-central1").https.onCall(async (data, context) => {
-  const { unsubscribeFromTopic: logicUnsubscribe } = require("./logic");
-  const { token, topic } = data;
-  
-  if (!token || !topic) {
-    throw new functionsV1.https.HttpsError('invalid-argument', 'The function must be called with a token and topic.');
+export const unsubscribetotopic = onCall(async (request) => {
+  const { data } = request;
+  if (!data || !data.token || !data.topic) {
+    throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');
   }
 
-  return await logicUnsubscribe(token, topic);
+  return await logic.unsubscribeFromTopic(data.token, data.topic);
 });
