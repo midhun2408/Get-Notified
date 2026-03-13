@@ -71,7 +71,7 @@ export class NotificationService {
       return;
     }
 
-    const subscribeToTopic = httpsCallable(this.functions, 'subscribeToTopic');
+    const subscribeToTopic = httpsCallable(this.functions, 'subscribeToTopicV2');
     try {
       const result: any = await subscribeToTopic({ token, topic });
       console.log('Subscription result:', result.data);
@@ -84,7 +84,7 @@ export class NotificationService {
     const token = this.currentToken.value;
     if (!token) return;
 
-    const unsubscribeToTopic = httpsCallable(this.functions, 'unsubscribeToTopic');
+    const unsubscribeToTopic = httpsCallable(this.functions, 'unsubscribeToTopicV2');
     try {
       const result: any = await unsubscribeToTopic({ token, topic });
       console.log('Unsubscription result:', result.data);

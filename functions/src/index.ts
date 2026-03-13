@@ -17,7 +17,7 @@ if (getApps().length === 0) {
 /**
  * Scheduled function to search for news using AI and RSS (Gen 2)
  */
-export const searchnewsai = onSchedule({
+export const searchNewsAiV2 = onSchedule({
   schedule: "*/10 * * * *",
   timeoutSeconds: 540,
   memory: "512MiB",
@@ -44,7 +44,7 @@ export const searchnewsai = onSchedule({
 /**
  * Triggered when a new topic is added (Gen 2)
  */
-export const ontopiccreated = onDocumentCreated("topics/{topicId}", async (event) => {
+export const onTopicCreatedV2 = onDocumentCreated("topics/{topicId}", async (event) => {
   const data = event.data?.data();
   const topicId = event.params.topicId;
 
@@ -68,7 +68,7 @@ export const ontopiccreated = onDocumentCreated("topics/{topicId}", async (event
 /**
  * Triggered when a topic is deleted (Gen 2)
  */
-export const ontopicdeleted = onDocumentDeleted("topics/{topicId}", async (event) => {
+export const onTopicDeletedV2 = onDocumentDeleted("topics/{topicId}", async (event) => {
   const data = event.data?.data();
   const topicId = event.params.topicId;
   const topicName = data?.name || topicId;
@@ -96,7 +96,7 @@ export const ontopicdeleted = onDocumentDeleted("topics/{topicId}", async (event
 /**
  * Callable function to subscribe a device to a topic (Gen 2)
  */
-export const subscribetotopic = onCall(async (request) => {
+export const subscribeToTopicV2 = onCall(async (request) => {
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');
@@ -108,7 +108,7 @@ export const subscribetotopic = onCall(async (request) => {
 /**
  * Callable function to unsubscribe a device from a topic (Gen 2)
  */
-export const unsubscribetotopic = onCall(async (request) => {
+export const unsubscribeToTopicV2 = onCall(async (request) => {
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');

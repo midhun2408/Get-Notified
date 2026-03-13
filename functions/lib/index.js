@@ -19,11 +19,11 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
-  ontopiccreated: () => ontopiccreated,
-  ontopicdeleted: () => ontopicdeleted,
-  searchnewsai: () => searchnewsai,
-  subscribetotopic: () => subscribetotopic,
-  unsubscribetotopic: () => unsubscribetotopic
+  onTopicCreatedV2: () => onTopicCreatedV2,
+  onTopicDeletedV2: () => onTopicDeletedV2,
+  searchNewsAiV2: () => searchNewsAiV2,
+  subscribeToTopicV2: () => subscribeToTopicV2,
+  unsubscribeToTopicV2: () => unsubscribeToTopicV2
 });
 module.exports = __toCommonJS(index_exports);
 var import_scheduler = require("firebase-functions/v2/scheduler");
@@ -374,7 +374,7 @@ async function unsubscribeFromTopic(token, topic) {
 if ((0, import_app.getApps)().length === 0) {
   (0, import_app.initializeApp)();
 }
-var searchnewsai = (0, import_scheduler.onSchedule)({
+var searchNewsAiV2 = (0, import_scheduler.onSchedule)({
   schedule: "*/10 * * * *",
   timeoutSeconds: 540,
   memory: "512MiB"
@@ -395,7 +395,7 @@ var searchnewsai = (0, import_scheduler.onSchedule)({
     console.error("Critical error in searchnewsai function:", error);
   }
 });
-var ontopiccreated = (0, import_firestore.onDocumentCreated)("topics/{topicId}", async (event) => {
+var onTopicCreatedV2 = (0, import_firestore.onDocumentCreated)("topics/{topicId}", async (event) => {
   const data = event.data?.data();
   const topicId = event.params.topicId;
   console.log(`[Trigger] onCreate fired for ID: ${topicId}. Data:`, JSON.stringify(data));
@@ -410,7 +410,7 @@ var ontopiccreated = (0, import_firestore.onDocumentCreated)("topics/{topicId}",
   await db.collection("topics").doc(topicId).update({ status: "ready" });
   console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
-var ontopicdeleted = (0, import_firestore.onDocumentDeleted)("topics/{topicId}", async (event) => {
+var onTopicDeletedV2 = (0, import_firestore.onDocumentDeleted)("topics/{topicId}", async (event) => {
   const data = event.data?.data();
   const topicId = event.params.topicId;
   const topicName = data?.name || topicId;
@@ -429,14 +429,14 @@ var ontopicdeleted = (0, import_firestore.onDocumentDeleted)("topics/{topicId}",
   await batch.commit();
   console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
-var subscribetotopic = (0, import_https.onCall)(async (request) => {
+var subscribeToTopicV2 = (0, import_https.onCall)(async (request) => {
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new import_https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
   }
   return await subscribeToTopic(data.token, data.topic);
 });
-var unsubscribetotopic = (0, import_https.onCall)(async (request) => {
+var unsubscribeToTopicV2 = (0, import_https.onCall)(async (request) => {
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new import_https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
@@ -445,9 +445,9 @@ var unsubscribetotopic = (0, import_https.onCall)(async (request) => {
 });
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  ontopiccreated,
-  ontopicdeleted,
-  searchnewsai,
-  subscribetotopic,
-  unsubscribetotopic
+  onTopicCreatedV2,
+  onTopicDeletedV2,
+  searchNewsAiV2,
+  subscribeToTopicV2,
+  unsubscribeToTopicV2
 });
