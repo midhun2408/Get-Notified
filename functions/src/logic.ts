@@ -426,3 +426,133 @@ export async function unsubscribeFromTopic(token: string, topic: string) {
     return { success: false, error: (error as any).message };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Telegram Polling Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches new messages from a Telegram channel via the Bot API.
+ * The bot must be an admin of the channel.
+ * Returns matched messages (text that contains at least one keyword).
+ */
+export async function pollTelegramChannel(
+  botToken: string,
+  channelUsername: string,
+  lastMessageId: number,
+  keywords: string[]
+): Promise<{ matchedText: string; matchedKeyword: string; newLastId: number }[]> {
+  const https = require("https");
+
+  const fetchJson = (url: string): Promise<any> =>
+    new Promise((resolve, reject) => {
+      https.get(url, (res: any) => {
+        let body = "";
+        res.on("data", (chunk: any) => (body += chunk));
+        res.on("end", () => {
+          try { resolve(JSON.parse(body)); }
+          catch (e) { reject(e); }
+        });
+      }).on("error", reject);
+    });
+
+  // Use getUpdates with allowed_updates limited to channel_post
+  const offset = lastMessageId > 0 ? lastMessageId + 1 : 0;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&limit=50&allowed_updates=["channel_post"]&timeout=0`;
+
+  console.log(`[Telegram] Polling channel ${channelUsername}, offset=${offset}`);
+
+  const response = await fetchJson(apiUrl);
+  if (!response.ok) {
+    console.error(`[Telegram] API error for ${channelUsername}:`, JSON.stringify(response));
+    return [];
+  }
+
+  const updates: any[] = response.result || [];
+  const matches: { matchedText: string; matchedKeyword: string; newLastId: number }[] = [];
+  let maxId = lastMessageId;
+
+  for (const update of updates) {
+    const post = update.channel_post;
+    if (!post) continue;
+
+    // Only process posts from the target channel
+    const chat = post.chat;
+    const chatId = chat?.id?.toString();
+    const chatUsername = (chat?.username || "").toLowerCase();
+    
+    const targetIdentifier = channelUsername.trim();
+    const isNumericId = /^-?\d+$/.test(targetIdentifier);
+    
+    if (isNumericId) {
+      if (chatId !== targetIdentifier) continue;
+    } else {
+      const targetUsername = targetIdentifier.replace(/^@/, "").toLowerCase();
+      if (chatUsername !== targetUsername) continue;
+    }
+
+    const updateId: number = update.update_id;
+    if (updateId > maxId) maxId = updateId;
+
+    const text: string = post.text || post.caption || "";
+    if (!text) continue;
+
+    const lowerText = text.toLowerCase();
+    for (const kw of keywords) {
+      if (lowerText.includes(kw.toLowerCase())) {
+        matches.push({ matchedText: text, matchedKeyword: kw, newLastId: maxId });
+        break; // Only report once per message even if multiple keywords match
+      }
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Sends a push notification to all registered FCM device tokens
+ * when a Telegram keyword match is found.
+ */
+export async function sendTelegramKeywordNotification(
+  channelUsername: string,
+  keyword: string,
+  messageText: string
+): Promise<void> {
+  const admin = getAdmin();
+  const db = getDb();
+
+  // Fetch all stored FCM tokens
+  const tokensSnap = await db.collection("fcmTokens").get();
+  const tokens: string[] = tokensSnap.docs.map((d: any) => d.data().token).filter(Boolean);
+
+  if (tokens.length === 0) {
+    console.log("[Telegram] No FCM tokens found, skipping notification.");
+    return;
+  }
+
+  // Truncate message for the notification body
+  const body = messageText.length > 180 ? messageText.substring(0, 177) + "..." : messageText;
+
+  const message: any = {
+    notification: {
+      title: `🔔 Keyword match: "${keyword}"`,
+      body: body,
+    },
+    data: {
+      keyword: keyword,
+      channel: channelUsername,
+      source: "telegram",
+    },
+    tokens: tokens,
+  };
+
+  try {
+    const batchResponse = await admin.messaging().sendEachForMulticast(message);
+    console.log(
+      `[Telegram] Notification sent. Success: ${batchResponse.successCount}, Failure: ${batchResponse.failureCount}`
+    );
+  } catch (error) {
+    console.error("[Telegram] Error sending keyword notification:", error);
+  }
+}
+

@@ -41,6 +41,6 @@ export class TopicsComponent  implements OnInit {
   }
 
   goBack() {
-    this.router.navigate(['/home']);
+    this.router.navigate(['/tabs/news']);
   }
 }

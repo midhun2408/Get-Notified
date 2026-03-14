@@ -50,16 +50,19 @@ export class HomeComponent  implements OnInit {
       });
 
       let hasNewTopicForced = false;
+
+      // Fallback for first launch: select ALL topics at once
+      if (this.selectedTopics.size === 0) {
+        this.topics.forEach(t => this.selectedTopics.add(t.name));
+        console.log('[Home] First launch — all topics auto-selected.');
+      }
+
       this.topics.forEach(t => {
         // If it's a brand new topic we haven't seen in this component instance, auto-select it
         if (oldTopicCount > 0 && !oldTopicNames.has(t.name)) {
           this.selectedTopics.add(t.name);
           hasNewTopicForced = true;
           console.log(`[Home] Addition detected. New topic ${t.name} auto-selected.`);
-        }
-        // Fallback for first launch
-        if (this.selectedTopics.size === 0) {
-          this.selectedTopics.add(t.name);
         }
       });
 

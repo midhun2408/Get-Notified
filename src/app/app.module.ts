@@ -6,7 +6,9 @@ import { CommonModule } from '@angular/common';
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { IonicModule } from '@ionic/angular';
+import { TabsComponent } from './tabs/tabs.component';
 import { HomeComponent } from './home/home.component';
+import { TelegramComponent } from './telegram/telegram.component';
 import { TopicsComponent } from './topics/topics.component';
 import { NewsDetailComponent } from './news-detail/news-detail.component';
 
@@ -27,7 +29,9 @@ const firebaseConfig = {
 @NgModule({
   declarations: [
     AppComponent,
+    TabsComponent,
     HomeComponent,
+    TelegramComponent,
     TopicsComponent,
     NewsDetailComponent
   ],

@@ -2,17 +2,9 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentCreated, onDocumentDeleted } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
-import { initializeApp, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import * as logic from "./logic";
 
 // Set global options for all functions
 setGlobalOptions({ region: "us-central1" });
-
-// Initialize admin on load
-if (getApps().length === 0) {
-  initializeApp();
-}
 
 /**
  * Scheduled function to search for news using AI and RSS (Gen 2)
@@ -22,6 +14,9 @@ export const searchNewsAiV2 = onSchedule({
   timeoutSeconds: 540,
   memory: "512MiB",
 }, async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await import("./logic");
+  
   try {
     const db = getFirestore();
     const topicsSnapshot = await db.collection("topics").get();
@@ -45,6 +40,9 @@ export const searchNewsAiV2 = onSchedule({
  * Triggered when a new topic is added (Gen 2)
  */
 export const onTopicCreatedV2 = onDocumentCreated("topics/{topicId}", async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await import("./logic");
+  
   const data = event.data?.data();
   const topicId = event.params.topicId;
 
@@ -69,6 +67,8 @@ export const onTopicCreatedV2 = onDocumentCreated("topics/{topicId}", async (eve
  * Triggered when a topic is deleted (Gen 2)
  */
 export const onTopicDeletedV2 = onDocumentDeleted("topics/{topicId}", async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
+  
   const data = event.data?.data();
   const topicId = event.params.topicId;
   const topicName = data?.name || topicId;
@@ -97,6 +97,7 @@ export const onTopicDeletedV2 = onDocumentDeleted("topics/{topicId}", async (eve
  * Callable function to subscribe a device to a topic (Gen 2)
  */
 export const subscribeToTopicV2 = onCall(async (request) => {
+  const logic = await import("./logic");
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');
@@ -109,6 +110,7 @@ export const subscribeToTopicV2 = onCall(async (request) => {
  * Callable function to unsubscribe a device from a topic (Gen 2)
  */
 export const unsubscribeToTopicV2 = onCall(async (request) => {
+  const logic = await import("./logic");
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new HttpsError('invalid-argument', 'The function must be called with a token and topic.');
@@ -116,3 +118,47 @@ export const unsubscribeToTopicV2 = onCall(async (request) => {
 
   return await logic.unsubscribeFromTopic(data.token, data.topic);
 });
+
+/**
+ * TEST VERSION: Renamed and moved token to environment or hardcoded for now
+ */
+export const telegramMonitor = onSchedule({
+  schedule: "*/2 * * * *",
+  timeoutSeconds: 120,
+  memory: "256MiB",
+}, async (_event) => {
+  // Using a test token or reading from env directly to avoid Secret Manager metadata hang
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || "";
+  if (!botToken) return;
+
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await import("./logic");
+  const db = getFirestore();
+
+  const [channelsSnap, keywordsSnap] = await Promise.all([
+    db.collection("telegramChannels").get(),
+    db.collection("telegramKeywords").get(),
+  ]);
+
+  if (channelsSnap.empty || keywordsSnap.empty) return;
+
+  const keywords = keywordsSnap.docs.map((d: any) => d.data().keyword as string).filter(Boolean);
+
+  for (const channelDoc of channelsSnap.docs) {
+    const channelData = channelDoc.data();
+    try {
+      const matches = await logic.pollTelegramChannel(botToken, channelData.username, channelData.lastMessageId || 0, keywords);
+      if (matches.length === 0) continue;
+
+      let newLastId = channelData.lastMessageId || 0;
+      for (const match of matches) {
+        await logic.sendTelegramKeywordNotification(channelData.username, match.matchedKeyword, match.matchedText);
+        if (match.newLastId > newLastId) newLastId = match.newLastId;
+      }
+      await db.collection("telegramChannels").doc(channelDoc.id).update({ lastMessageId: newLastId });
+    } catch (err) {}
+  }
+});
+
+
+

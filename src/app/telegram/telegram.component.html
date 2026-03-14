@@ -1,0 +1,113 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar style="--background: transparent; --color: inherit;" class="bg-white dark:bg-darkBg py-2 px-4 border-b border-gray-200 dark:border-glassBg shadow-sm dark:shadow-neon-blue transition-all duration-300">
+    <ion-title class="text-gray-900 dark:text-neonBlue font-bold tracking-widest text-2xl font-sans">Telegram</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="themeService.toggleTheme()" class="text-gray-600 dark:text-neonBlue">
+        <ion-icon [name]="themeService.isDarkMode() ? 'sunny-outline' : 'moon-outline'" slot="icon-only"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content style="--background: transparent; --color: inherit;" class="bg-gray-50 dark:bg-darkBg transition-all duration-300">
+  <div class="p-4 bg-gray-50 dark:bg-darkBg min-h-full pb-24 transition-colors duration-300">
+
+    <!-- ── Channels ───────────────────────────────────────────────── -->
+    <div class="mb-8 mt-4">
+      <h2 class="text-gray-500 dark:text-gray-300 font-mono text-xs tracking-[0.2em] mb-4 uppercase flex items-center gap-2">
+        <ion-icon name="paper-plane-outline" class="text-neonBlue"></ion-icon>
+        Linked Channels
+      </h2>
+
+      <!-- Add channel input -->
+      <div class="relative flex items-center mb-4">
+        <div class="absolute inset-0 bg-neonBlue opacity-10 dark:opacity-20 blur rounded-xl"></div>
+        <div class="relative flex w-full bg-white dark:bg-[#0d0d14] rounded-xl border border-gray-300 dark:border-neonBlue shadow-sm dark:shadow-neon-blue overflow-hidden focus-within:ring-2 ring-neonBlue transition-all">
+          <ion-icon name="at-outline" class="self-center ml-4 text-gray-400 dark:text-neonBlue text-xl flex-shrink-0"></ion-icon>
+          <input
+            type="text"
+            [(ngModel)]="newChannel"
+            (keyup.enter)="addChannel()"
+            placeholder="channel_username"
+            class="flex-1 bg-transparent text-gray-900 dark:text-white px-3 py-3 outline-none font-mono placeholder-gray-400 dark:placeholder-gray-600">
+          <button
+            (click)="addChannel()"
+            [disabled]="addingChannel"
+            class="px-5 bg-gray-50 dark:bg-glassBg text-neonBlue font-bold border-l border-gray-300 dark:border-neonBlue hover:bg-neonBlue hover:text-black disabled:opacity-50 transition-colors duration-300">
+            {{ addingChannel ? '...' : 'ADD' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Channel list -->
+      <div class="space-y-3">
+        <div *ngFor="let ch of channels"
+             class="group flex justify-between items-center p-4 bg-white dark:bg-[#0d0d14] rounded-xl border border-gray-200 dark:border-glassBg hover:border-neonBlue transition-colors duration-300 shadow-sm">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-neonBlue to-neonPurple flex items-center justify-center flex-shrink-0">
+              <ion-icon name="paper-plane" class="text-white text-sm"></ion-icon>
+            </div>
+            <span class="text-gray-800 dark:text-gray-100 font-mono tracking-wide">{{ ch.username }}</span>
+          </div>
+          <button (click)="removeChannel(ch.id)" class="text-gray-400 hover:text-neonPink transition-colors p-1">
+            <ion-icon name="close-circle-outline" class="text-xl"></ion-icon>
+          </button>
+        </div>
+
+        <div *ngIf="channels.length === 0" class="text-center text-gray-400 dark:text-gray-600 mt-4 font-mono text-xs py-6 border border-dashed border-gray-200 dark:border-glassBg rounded-xl">
+          No channels linked yet.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Keywords ───────────────────────────────────────────────── -->
+    <div>
+      <h2 class="text-gray-500 dark:text-gray-300 font-mono text-xs tracking-[0.2em] mb-4 uppercase flex items-center gap-2">
+        <ion-icon name="key-outline" class="text-neonPurple"></ion-icon>
+        Watch Keywords
+      </h2>
+
+      <!-- Add keyword input -->
+      <div class="relative flex items-center mb-4">
+        <div class="absolute inset-0 bg-neonPurple opacity-10 dark:opacity-20 blur rounded-xl"></div>
+        <div class="relative flex w-full bg-white dark:bg-[#0d0d14] rounded-xl border border-gray-300 dark:border-neonPurple shadow-sm dark:shadow-neon-purple overflow-hidden focus-within:ring-2 ring-neonPurple transition-all">
+          <ion-icon name="search-outline" class="self-center ml-4 text-gray-400 dark:text-neonPurple text-xl flex-shrink-0"></ion-icon>
+          <input
+            type="text"
+            [(ngModel)]="newKeyword"
+            (keyup.enter)="addKeyword()"
+            placeholder="e.g. bitcoin, breaking..."
+            class="flex-1 bg-transparent text-gray-900 dark:text-white px-3 py-3 outline-none font-mono placeholder-gray-400 dark:placeholder-gray-600">
+          <button
+            (click)="addKeyword()"
+            [disabled]="addingKeyword"
+            class="px-5 bg-gray-50 dark:bg-glassBg text-neonPurple font-bold border-l border-gray-300 dark:border-neonPurple hover:bg-neonPurple hover:text-black disabled:opacity-50 transition-colors duration-300">
+            {{ addingKeyword ? '...' : 'ADD' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Keyword pills -->
+      <div class="flex flex-wrap gap-2">
+        <div *ngFor="let kw of keywords"
+             class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-[#0d0d14] rounded-full border border-gray-200 dark:border-neonPurple shadow-sm hover:border-neonPink transition-colors duration-300">
+          <ion-icon name="flash-outline" class="text-neonPurple text-sm"></ion-icon>
+          <span class="text-gray-800 dark:text-gray-100 font-mono text-sm tracking-wide">{{ kw.keyword }}</span>
+          <button (click)="removeKeyword(kw.id)" class="text-gray-400 hover:text-neonPink transition-colors ml-1">
+            <ion-icon name="close-outline" class="text-base"></ion-icon>
+          </button>
+        </div>
+
+        <div *ngIf="keywords.length === 0" class="w-full text-center text-gray-400 dark:text-gray-600 font-mono text-xs py-6 border border-dashed border-gray-200 dark:border-glassBg rounded-xl">
+          No keywords added yet.
+        </div>
+      </div>
+
+      <!-- Info note -->
+      <p class="mt-6 text-xs text-gray-400 dark:text-gray-600 font-mono text-center leading-relaxed">
+        You'll get a push notification when any linked channel posts a message containing one of your keywords.
+      </p>
+    </div>
+
+  </div>
+</ion-content>

@@ -1,7 +1,12 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -14,26 +19,33 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/index.ts
-var index_exports = {};
-__export(index_exports, {
-  onTopicCreatedV2: () => onTopicCreatedV2,
-  onTopicDeletedV2: () => onTopicDeletedV2,
-  searchNewsAiV2: () => searchNewsAiV2,
-  subscribeToTopicV2: () => subscribeToTopicV2,
-  unsubscribeToTopicV2: () => unsubscribeToTopicV2
-});
-module.exports = __toCommonJS(index_exports);
-var import_scheduler = require("firebase-functions/v2/scheduler");
-var import_firestore = require("firebase-functions/v2/firestore");
-var import_https = require("firebase-functions/v2/https");
-var import_v2 = require("firebase-functions/v2");
-var import_app = require("firebase-admin/app");
-var import_firestore2 = require("firebase-admin/firestore");
-
 // src/logic.ts
+var logic_exports = {};
+__export(logic_exports, {
+  TOPIC_FEEDS: () => TOPIC_FEEDS,
+  decodeArticleUrl: () => decodeArticleUrl,
+  fetchArticleData: () => fetchArticleData,
+  fetchWithRedirects: () => fetchWithRedirects,
+  getAdmin: () => getAdmin,
+  getDb: () => getDb,
+  getParser: () => getParser,
+  pollTelegramChannel: () => pollTelegramChannel,
+  processTopic: () => processTopic,
+  sendNotification: () => sendNotification,
+  sendTelegramKeywordNotification: () => sendTelegramKeywordNotification,
+  subscribeToTopic: () => subscribeToTopic,
+  unsubscribeFromTopic: () => unsubscribeFromTopic
+});
 function getAdmin() {
   const admin = require("firebase-admin");
   return admin;
@@ -42,7 +54,6 @@ function getDb() {
   const admin = require("firebase-admin");
   return admin.firestore();
 }
-var _parser;
 function getParser() {
   if (!_parser) {
     const Parser = require("rss-parser");
@@ -170,23 +181,6 @@ async function fetchArticleData(url) {
     return { description: null, imageUrl: null };
   }
 }
-var TOPIC_FEEDS = {
-  "Kerala": [
-    "https://www.thehindu.com/news/national/kerala/feeder/default.rss",
-    "https://www.onmanorama.com/rss/news.xml"
-  ],
-  "India": [
-    "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
-    "https://www.thehindu.com/news/national/feeder/default.rss"
-  ],
-  "World": [
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://timesofindia.indiatimes.com/rssfeeds/29473334.cms"
-  ],
-  "Technology": [
-    "https://gadgets360.com/rss/feeds"
-  ]
-};
 async function processTopic(topic) {
   try {
     const db = getDb();
@@ -375,19 +369,139 @@ async function unsubscribeFromTopic(token, topic) {
     return { success: false, error: error.message };
   }
 }
+async function pollTelegramChannel(botToken, channelUsername, lastMessageId, keywords) {
+  const https = require("https");
+  const fetchJson = (url) => new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let body = "";
+      res.on("data", (chunk) => body += chunk);
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on("error", reject);
+  });
+  const offset = lastMessageId > 0 ? lastMessageId + 1 : 0;
+  const apiUrl = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&limit=50&allowed_updates=["channel_post"]&timeout=0`;
+  console.log(`[Telegram] Polling channel ${channelUsername}, offset=${offset}`);
+  const response = await fetchJson(apiUrl);
+  if (!response.ok) {
+    console.error(`[Telegram] API error for ${channelUsername}:`, JSON.stringify(response));
+    return [];
+  }
+  const updates = response.result || [];
+  const matches = [];
+  let maxId = lastMessageId;
+  for (const update of updates) {
+    const post = update.channel_post;
+    if (!post) continue;
+    const chat = post.chat;
+    const chatId = chat?.id?.toString();
+    const chatUsername = (chat?.username || "").toLowerCase();
+    const targetIdentifier = channelUsername.trim();
+    const isNumericId = /^-?\d+$/.test(targetIdentifier);
+    if (isNumericId) {
+      if (chatId !== targetIdentifier) continue;
+    } else {
+      const targetUsername = targetIdentifier.replace(/^@/, "").toLowerCase();
+      if (chatUsername !== targetUsername) continue;
+    }
+    const updateId = update.update_id;
+    if (updateId > maxId) maxId = updateId;
+    const text = post.text || post.caption || "";
+    if (!text) continue;
+    const lowerText = text.toLowerCase();
+    for (const kw of keywords) {
+      if (lowerText.includes(kw.toLowerCase())) {
+        matches.push({ matchedText: text, matchedKeyword: kw, newLastId: maxId });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+async function sendTelegramKeywordNotification(channelUsername, keyword, messageText) {
+  const admin = getAdmin();
+  const db = getDb();
+  const tokensSnap = await db.collection("fcmTokens").get();
+  const tokens = tokensSnap.docs.map((d) => d.data().token).filter(Boolean);
+  if (tokens.length === 0) {
+    console.log("[Telegram] No FCM tokens found, skipping notification.");
+    return;
+  }
+  const body = messageText.length > 180 ? messageText.substring(0, 177) + "..." : messageText;
+  const message = {
+    notification: {
+      title: `\u{1F514} Keyword match: "${keyword}"`,
+      body
+    },
+    data: {
+      keyword,
+      channel: channelUsername,
+      source: "telegram"
+    },
+    tokens
+  };
+  try {
+    const batchResponse = await admin.messaging().sendEachForMulticast(message);
+    console.log(
+      `[Telegram] Notification sent. Success: ${batchResponse.successCount}, Failure: ${batchResponse.failureCount}`
+    );
+  } catch (error) {
+    console.error("[Telegram] Error sending keyword notification:", error);
+  }
+}
+var _parser, TOPIC_FEEDS;
+var init_logic = __esm({
+  "src/logic.ts"() {
+    TOPIC_FEEDS = {
+      "Kerala": [
+        "https://www.thehindu.com/news/national/kerala/feeder/default.rss",
+        "https://www.onmanorama.com/rss/news.xml"
+      ],
+      "India": [
+        "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
+        "https://www.thehindu.com/news/national/feeder/default.rss"
+      ],
+      "World": [
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "https://timesofindia.indiatimes.com/rssfeeds/29473334.cms"
+      ],
+      "Technology": [
+        "https://gadgets360.com/rss/feeds"
+      ]
+    };
+  }
+});
 
 // src/index.ts
+var index_exports = {};
+__export(index_exports, {
+  onTopicCreatedV2: () => onTopicCreatedV2,
+  onTopicDeletedV2: () => onTopicDeletedV2,
+  searchNewsAiV2: () => searchNewsAiV2,
+  subscribeToTopicV2: () => subscribeToTopicV2,
+  telegramMonitor: () => telegramMonitor,
+  unsubscribeToTopicV2: () => unsubscribeToTopicV2
+});
+module.exports = __toCommonJS(index_exports);
+var import_scheduler = require("firebase-functions/v2/scheduler");
+var import_firestore = require("firebase-functions/v2/firestore");
+var import_https = require("firebase-functions/v2/https");
+var import_v2 = require("firebase-functions/v2");
 (0, import_v2.setGlobalOptions)({ region: "us-central1" });
-if ((0, import_app.getApps)().length === 0) {
-  (0, import_app.initializeApp)();
-}
 var searchNewsAiV2 = (0, import_scheduler.onSchedule)({
   schedule: "*/10 * * * *",
   timeoutSeconds: 540,
   memory: "512MiB"
 }, async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await Promise.resolve().then(() => (init_logic(), logic_exports));
   try {
-    const db = (0, import_firestore2.getFirestore)();
+    const db = getFirestore();
     const topicsSnapshot = await db.collection("topics").get();
     const allTopics = topicsSnapshot.docs.map((doc) => doc.data().name);
     if (allTopics.length === 0) {
@@ -396,13 +510,15 @@ var searchNewsAiV2 = (0, import_scheduler.onSchedule)({
     }
     console.log(`Starting scheduled news search for ${allTopics.length} topics...`);
     for (const topic of allTopics) {
-      await processTopic(topic);
+      await logic.processTopic(topic);
     }
   } catch (error) {
     console.error("Critical error in searchnewsai function:", error);
   }
 });
 var onTopicCreatedV2 = (0, import_firestore.onDocumentCreated)("topics/{topicId}", async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await Promise.resolve().then(() => (init_logic(), logic_exports));
   const data = event.data?.data();
   const topicId = event.params.topicId;
   console.log(`[Trigger] onCreate fired for ID: ${topicId}. Data:`, JSON.stringify(data));
@@ -412,12 +528,13 @@ var onTopicCreatedV2 = (0, import_firestore.onDocumentCreated)("topics/{topicId}
     return;
   }
   console.log(`[Trigger] Fetching news for topic: ${topicName}...`);
-  await processTopic(topicName);
-  const db = (0, import_firestore2.getFirestore)();
+  await logic.processTopic(topicName);
+  const db = getFirestore();
   await db.collection("topics").doc(topicId).update({ status: "ready" });
   console.log(`[Trigger] Topic ${topicName} marked as ready.`);
 });
 var onTopicDeletedV2 = (0, import_firestore.onDocumentDeleted)("topics/{topicId}", async (event) => {
+  const { getFirestore } = await import("firebase-admin/firestore");
   const data = event.data?.data();
   const topicId = event.params.topicId;
   const topicName = data?.name || topicId;
@@ -426,7 +543,7 @@ var onTopicDeletedV2 = (0, import_firestore.onDocumentDeleted)("topics/{topicId}
     console.error(`[Trigger] Could not determine topic name for ${topicId}`);
     return;
   }
-  const db = (0, import_firestore2.getFirestore)();
+  const db = getFirestore();
   const newsRef = db.collection("news");
   const q = newsRef.where("topic", "==", topicName);
   const snapshot = await q.get();
@@ -437,18 +554,51 @@ var onTopicDeletedV2 = (0, import_firestore.onDocumentDeleted)("topics/{topicId}
   console.log(`[Trigger] Deleted ${snapshot.size} news items for topic: ${topicName}`);
 });
 var subscribeToTopicV2 = (0, import_https.onCall)(async (request) => {
+  const logic = await Promise.resolve().then(() => (init_logic(), logic_exports));
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new import_https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
   }
-  return await subscribeToTopic(data.token, data.topic);
+  return await logic.subscribeToTopic(data.token, data.topic);
 });
 var unsubscribeToTopicV2 = (0, import_https.onCall)(async (request) => {
+  const logic = await Promise.resolve().then(() => (init_logic(), logic_exports));
   const { data } = request;
   if (!data || !data.token || !data.topic) {
     throw new import_https.HttpsError("invalid-argument", "The function must be called with a token and topic.");
   }
-  return await unsubscribeFromTopic(data.token, data.topic);
+  return await logic.unsubscribeFromTopic(data.token, data.topic);
+});
+var telegramMonitor = (0, import_scheduler.onSchedule)({
+  schedule: "*/2 * * * *",
+  timeoutSeconds: 120,
+  memory: "256MiB"
+}, async (_event) => {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || "";
+  if (!botToken) return;
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const logic = await Promise.resolve().then(() => (init_logic(), logic_exports));
+  const db = getFirestore();
+  const [channelsSnap, keywordsSnap] = await Promise.all([
+    db.collection("telegramChannels").get(),
+    db.collection("telegramKeywords").get()
+  ]);
+  if (channelsSnap.empty || keywordsSnap.empty) return;
+  const keywords = keywordsSnap.docs.map((d) => d.data().keyword).filter(Boolean);
+  for (const channelDoc of channelsSnap.docs) {
+    const channelData = channelDoc.data();
+    try {
+      const matches = await logic.pollTelegramChannel(botToken, channelData.username, channelData.lastMessageId || 0, keywords);
+      if (matches.length === 0) continue;
+      let newLastId = channelData.lastMessageId || 0;
+      for (const match of matches) {
+        await logic.sendTelegramKeywordNotification(channelData.username, match.matchedKeyword, match.matchedText);
+        if (match.newLastId > newLastId) newLastId = match.newLastId;
+      }
+      await db.collection("telegramChannels").doc(channelDoc.id).update({ lastMessageId: newLastId });
+    } catch (err) {
+    }
+  }
 });
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
@@ -456,5 +606,6 @@ var unsubscribeToTopicV2 = (0, import_https.onCall)(async (request) => {
   onTopicDeletedV2,
   searchNewsAiV2,
   subscribeToTopicV2,
+  telegramMonitor,
   unsubscribeToTopicV2
 });
