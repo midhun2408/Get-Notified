@@ -237,6 +237,13 @@ async function processTopic(topic) {
       if (lastProcessedTime > 0 && articleTime <= lastProcessedTime) {
         continue;
       }
+      const todayUTCStart = /* @__PURE__ */ new Date();
+      todayUTCStart.setUTCHours(0, 0, 0, 0);
+      const todayUTCEnd = todayUTCStart.getTime() + 24 * 60 * 60 * 1e3;
+      if (articleTime > 0 && (articleTime < todayUTCStart.getTime() || articleTime >= todayUTCEnd)) {
+        console.log(`[${topic}] Skipping old article (not today): ${article.title}`);
+        continue;
+      }
       const crypto = require("crypto");
       const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
       const newsRef = db.collection("news").doc(articleHash);

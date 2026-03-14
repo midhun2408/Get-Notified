@@ -263,6 +263,16 @@ export async function processTopic(topic: string) {
         continue;
       }
 
+      // SKIP if article is not from today (UTC)
+      const todayUTCStart = new Date();
+      todayUTCStart.setUTCHours(0, 0, 0, 0);
+      const todayUTCEnd = todayUTCStart.getTime() + 24 * 60 * 60 * 1000;
+      if (articleTime > 0 && (articleTime < todayUTCStart.getTime() || articleTime >= todayUTCEnd)) {
+        console.log(`[${topic}] Skipping old article (not today): ${article.title}`);
+        continue;
+      }
+
+
       const crypto = require("crypto");
       const articleHash = crypto.createHash("md5").update(article.link).digest("hex");
       const newsRef = db.collection("news").doc(articleHash);
