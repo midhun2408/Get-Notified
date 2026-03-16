@@ -67,25 +67,23 @@ export class NewsService {
   getNewsForTopics(topics: string[]): Observable<NewsItem[]> {
     if (topics.length === 0) return new BehaviorSubject<NewsItem[]>([]).asObservable();
     
+    // Only keep news from today (local date)
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    
     const newsRef = collection(this.firestore, 'news');
-    const q = query(newsRef, where('topic', 'in', topics));
+    // Filter by topics AND timestamp in the query
+    const q = query(
+      newsRef, 
+      where('topic', 'in', topics),
+      where('timestamp', '>=', todayStart)
+    );
+
     return (collectionData(q, { idField: 'id' }) as Observable<NewsItem[]>).pipe(
       map(news => news.map(item => ({
         ...item,
         timestamp: item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000) : item.timestamp
       }))),
-      map(news => {
-        // Only keep news from today (local date)
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-        const todayEnd = todayStart + 24 * 60 * 60 * 1000;
-        return news.filter(item => {
-          const t = item.timestamp instanceof Date
-            ? item.timestamp.getTime()
-            : new Date(item.time || 0).getTime();
-          return t >= todayStart && t < todayEnd;
-        });
-      }),
       map(news => news.slice().sort((a, b) => {
         const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp || a.time).getTime();
         const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp || b.time).getTime();
