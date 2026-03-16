@@ -123,17 +123,17 @@ export class HomeComponent  implements OnInit {
           return;
         }
 
+        this.isInitialLoad = false;
+
         if (showLoader) {
           const elapsed = Date.now() - startTime;
           const remaining = Math.max(0, 800 - elapsed);
           setTimeout(() => {
             console.log('[Home] Sync complete, hiding loader.');
             this.isLoading = false;
-            this.isInitialLoad = false;
           }, remaining);
         } else {
           this.isLoading = false;
-          this.isInitialLoad = false;
         }
       },
       error: (err) => {

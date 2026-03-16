@@ -30,25 +30,38 @@ export class NewsService {
 
   async addTopic(topic: string) {
     const topicsRef = collection(this.firestore, 'topics');
-    return await addDoc(topicsRef, { name: topic, status: 'pending' });
+    const docRef = await addDoc(topicsRef, { name: topic, status: 'pending' });
+    
+    // Trigger Cloudflare Worker
+    try {
+      await fetch('https://worker.get-notified-api.workers.dev/topic/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: topic, id: docRef.id })
+      });
+    } catch (e) {
+      console.error('Failed to trigger worker for topic creation:', e);
+    }
+    return docRef;
   }
 
   async removeTopic(id: string, name: string) {
-    // 1. Delete associated news
-    const newsRef = collection(this.firestore, 'news');
-    const q = query(newsRef, where('topic', '==', name));
-    const snapshot = await getDocs(q);
-    
-    if (!snapshot.empty) {
-      const batch = writeBatch(this.firestore);
-      snapshot.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-      console.log(`Cleaned up ${snapshot.size} news items for topic: ${name}`);
+    // 1. Delete topic from Firestore
+    const topicDocRef = doc(this.firestore, `topics/${id}`);
+    const result = await deleteDoc(topicDocRef);
+
+    // 2. Trigger Cloudflare Worker to clean up associated news in background
+    try {
+      await fetch('https://worker.get-notified-api.workers.dev/topic/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+    } catch (e) {
+      console.error('Failed to trigger worker for topic deletion:', e);
     }
 
-    // 2. Delete topic
-    const topicDocRef = doc(this.firestore, `topics/${id}`);
-    return deleteDoc(topicDocRef);
+    return result;
   }
 
   getNewsForTopics(topics: string[]): Observable<NewsItem[]> {

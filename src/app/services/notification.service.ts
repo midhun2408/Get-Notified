@@ -71,10 +71,14 @@ export class NotificationService {
       return;
     }
 
-    const subscribeToTopic = httpsCallable(this.functions, 'subscribeToTopicV2');
     try {
-      const result: any = await subscribeToTopic({ token, topic });
-      console.log('Subscription result:', result.data);
+      const response = await fetch('https://worker.get-notified-api.workers.dev/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, topic })
+      });
+      const result = await response.json();
+      console.log('Subscription result:', result);
     } catch (error) {
       console.error('Subscription failed:', error);
     }
@@ -84,10 +88,14 @@ export class NotificationService {
     const token = this.currentToken.value;
     if (!token) return;
 
-    const unsubscribeToTopic = httpsCallable(this.functions, 'unsubscribeToTopicV2');
     try {
-      const result: any = await unsubscribeToTopic({ token, topic });
-      console.log('Unsubscription result:', result.data);
+      const response = await fetch('https://worker.get-notified-api.workers.dev/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, topic })
+      });
+      const result = await response.json();
+      console.log('Unsubscription result:', result);
     } catch (error) {
       console.error('Unsubscription failed:', error);
     }
