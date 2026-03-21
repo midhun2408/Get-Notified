@@ -1,9 +1,10 @@
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import { Firestore, collection, doc, setDoc } from '@angular/fire/firestore';
 import { Functions, httpsCallable } from '@angular/fire/functions';
 import { PushNotifications, Token } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { BehaviorSubject } from 'rxjs';
+import { Router } from '@angular/router';
 
 @Injectable({
   providedIn: 'root'
@@ -11,40 +12,61 @@ import { BehaviorSubject } from 'rxjs';
 export class NotificationService {
   private currentToken = new BehaviorSubject<string | null>(null);
 
-  constructor(private firestore: Firestore, private functions: Functions) { 
+  constructor(
+    private firestore: Firestore, 
+    private functions: Functions,
+    private router: Router,
+    private zone: NgZone
+  ) { 
     if (Capacitor.getPlatform() !== 'web') {
       this.initPush();
     }
   }
 
   async initPush() {
-    // Request permission to use push notifications
-    // iOS will prompt user and return execution after they confirm or deny
-    let permStatus = await PushNotifications.checkPermissions();
+    try {
+      // Request permission to use push notifications
+      // iOS will prompt user and return execution after they confirm or deny
+      let permStatus = await PushNotifications.checkPermissions();
 
-    if (permStatus.receive === 'prompt') {
-      permStatus = await PushNotifications.requestPermissions();
+      if (permStatus.receive === 'prompt') {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+
+      if (permStatus.receive !== 'granted') {
+        console.warn('User denied permissions or permissions not available!');
+        return; // Don't throw to avoid blocking execution
+      }
+
+      await PushNotifications.register();
+
+      PushNotifications.addListener('registration', (token: Token) => {
+        console.log('FCM Token Generated:', token.value);
+        this.currentToken.next(token.value);
+        this.saveToken(token.value);
+      });
+
+      PushNotifications.addListener('registrationError', (err: any) => {
+        console.error('Registration error: ', err.error);
+      });
+
+      PushNotifications.addListener('pushNotificationReceived', (notification) => {
+        console.log('Push received: ', notification);
+      });
+
+      PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        console.log('Push action performed: ', action);
+        const data = action.notification.data;
+        if (data && data.id) {
+          console.log('Navigating to news-detail with ID:', data.id);
+          this.zone.run(() => {
+            this.router.navigate(['/news-detail', data.id]);
+          });
+        }
+      });
+    } catch (err) {
+      console.error('Push notification initialization failed:', err);
     }
-
-    if (permStatus.receive !== 'granted') {
-      throw new Error('User denied permissions!');
-    }
-
-    await PushNotifications.register();
-
-    PushNotifications.addListener('registration', (token: Token) => {
-      console.log('FCM Token Generated:', token.value);
-      this.currentToken.next(token.value);
-      this.saveToken(token.value);
-    });
-
-    PushNotifications.addListener('registrationError', (err: any) => {
-      console.error('Registration error: ', err.error);
-    });
-
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('Push received: ', notification);
-    });
   }
 
   requestPermission() {

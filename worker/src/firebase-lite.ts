@@ -180,6 +180,64 @@ export class FirebaseLite {
       });
   }
 
+  static normalizeTopic(topic: string): string {
+    return topic.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9-_.~%]/g, '');
+  }
+
+  async subscribeToTopic(token: string, topic: string): Promise<any> {
+    const accessToken = await this.getAccessToken();
+    const normalizedTopic = FirebaseLite.normalizeTopic(topic);
+    const url = 'https://iid.googleapis.com/iid/v1:batchAdd';
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'access_token_auth': 'true'
+      },
+      body: JSON.stringify({
+        to: `/topics/${normalizedTopic}`,
+        registration_tokens: [token]
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`FCM Subscribe error:`, error);
+      throw new Error(`FCM Subscribe error ${response.status}: ${error}`);
+    }
+
+    return await response.json();
+  }
+
+  async unsubscribeFromTopic(token: string, topic: string): Promise<any> {
+    const accessToken = await this.getAccessToken();
+    const normalizedTopic = FirebaseLite.normalizeTopic(topic);
+    const url = 'https://iid.googleapis.com/iid/v1:batchRemove';
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'access_token_auth': 'true'
+      },
+      body: JSON.stringify({
+        to: `/topics/${normalizedTopic}`,
+        registration_tokens: [token]
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`FCM Unsubscribe error:`, error);
+      throw new Error(`FCM Unsubscribe error ${response.status}: ${error}`);
+    }
+
+    return await response.json();
+  }
+
   async sendFcmMessage(message: any): Promise<any> {
     const token = await this.getAccessToken();
     const url = `https://fcm.googleapis.com/v1/projects/${this.serviceAccount.project_id}/messages:send`;

@@ -30,16 +30,32 @@ export default {
             // Subscription Endpoints
             if (url.pathname === '/subscribe' && request.method === 'POST') {
                 const { token, topic } = await request.json() as any;
-                // Cloudflare Worker can't directly use admin.messaging().subscribeToTopic
-                // We store the subscription in Firestore for now, or use a separate FCM subscription API if available.
-                // For this migration, we'll store it in a 'subscriptions' collection.
-                await firebase.createDocument('subscriptions', { token, topic, createdAt: new Date() }, `${token}_${topic.replace(/\s+/g, '_')}`);
+                const normalizedTopic = FirebaseLite.normalizeTopic(topic);
+                
+                // 1. Subscribe in FCM
+                ctx.waitUntil(firebase.subscribeToTopic(token, topic));
+                
+                // 2. Store in Firestore for record-keeping
+                await firebase.createDocument('subscriptions', { 
+                    token, 
+                    topic, 
+                    normalizedTopic,
+                    createdAt: new Date().toISOString() 
+                }, `${token}_${normalizedTopic}`);
+                
                 return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
             }
 
             if (url.pathname === '/unsubscribe' && request.method === 'POST') {
                 const { token, topic } = await request.json() as any;
-                await firebase.deleteDocument(`subscriptions/${token}_${topic.replace(/\s+/g, '_')}`);
+                const normalizedTopic = FirebaseLite.normalizeTopic(topic);
+
+                // 1. Unsubscribe in FCM
+                ctx.waitUntil(firebase.unsubscribeFromTopic(token, topic));
+
+                // 2. Remove from Firestore
+                await firebase.deleteDocument(`subscriptions/${token}_${normalizedTopic}`);
+                
                 return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
             }
 
@@ -109,6 +125,16 @@ export default {
                 return new Response(JSON.stringify({ success: true, message: 'News cleanup triggered.' }), { headers: corsHeaders });
             }
 
+            if (url.pathname === '/inspect' && request.method === 'GET') {
+                try {
+                    const topics = await firebase.listDocuments('topics');
+                    const logs = await firebase.listDocuments('debug_logs');
+                    return new Response(JSON.stringify({ success: true, topics, logs: logs.slice(0, 50) }), { headers: corsHeaders });
+                } catch (e: any) {
+                    return new Response(JSON.stringify({ success: false, error: e.message }), { headers: corsHeaders });
+                }
+            }
+
             // Manual Triggers for Testing
             if (url.pathname === '/trigger/news') {
                 ctx.waitUntil(processAllTopics(firebase));
@@ -118,6 +144,23 @@ export default {
             if (url.pathname === '/trigger/telegram') {
                 ctx.waitUntil(pollTelegram(firebase, env.TELEGRAM_BOT_TOKEN));
                 return new Response(JSON.stringify({ success: true, message: 'Telegram monitor triggered.' }), { headers: corsHeaders });
+            }
+
+            if (url.pathname === '/migrate-subscriptions') {
+                ctx.waitUntil((async () => {
+                    const subs = await firebase.listDocuments('subscriptions');
+                    console.log(`Migrating ${subs.length} subscriptions...`);
+                    for (const sub of subs) {
+                        try {
+                            await firebase.subscribeToTopic(sub.token, sub.topic);
+                            console.log(`Migrated: ${sub.token.substring(0, 10)}... -> ${sub.topic}`);
+                        } catch (e: any) {
+                            console.error(`Migration failed for ${sub.token.substring(0, 10)}...: ${e.message}`);
+                        }
+                    }
+                    console.log('Migration complete.');
+                })());
+                return new Response(JSON.stringify({ success: true, message: 'Migration triggered.' }), { headers: corsHeaders });
             }
 
             return new Response('Not Found', { status: 404, headers: corsHeaders });

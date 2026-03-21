@@ -2,19 +2,19 @@ import { FirebaseLite } from './firebase-lite';
 import Parser from 'rss-parser';
 
 const TOPIC_FEEDS: { [key: string]: string[] } = {
-  'Kerala': [
+  'kerala': [
     'https://www.thehindu.com/news/national/kerala/feeder/default.rss',
     'https://www.onmanorama.com/rss/news.xml'
   ],
-  'India': [
+  'india': [
     'https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms',
     'https://www.thehindu.com/news/national/feeder/default.rss'
   ],
-  'World': [
+  'world': [
     'https://www.aljazeera.com/xml/rss/all.xml',
     'https://timesofindia.indiatimes.com/rssfeeds/29473334.cms'
   ],
-  'Technology': [
+  'technology': [
     'https://gadgets360.com/rss/feeds'
   ]
 };
@@ -49,29 +49,24 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
       }
     };
 
-    if (TOPIC_FEEDS[topicName]) {
+    const normalizedTopicName = topicName.trim().toLowerCase();
+
+    if (TOPIC_FEEDS[normalizedTopicName]) {
       console.log(`Using direct publisher feeds for ${topicName}`);
-      for (const url of TOPIC_FEEDS[topicName]) {
+      const feedPromises = TOPIC_FEEDS[normalizedTopicName].map(async (url) => {
         try {
           const res = await fetch(url, fetchOptions);
           if (!res.ok) throw new Error(`Status ${res.status}`);
           const text = await res.text();
           const feed = await parser.parseString(text);
-          console.log(`[${topicName}] Feed ${url} parsed. Items: ${feed.items?.length || 0}`);
-          
-          await firebase.createDocument('debug_logs', {
-            topic: topicName,
-            status: 'parsed',
-            url: url,
-            count: feed.items?.length || 0,
-            timestamp: new Date().toISOString()
-          });
-
-          items = items.concat(feed.items.slice(0, 10));
+          return feed.items.slice(0, 10);
         } catch (e: any) {
           console.error(`Error fetching direct feed ${url}:`, e.message);
+          return [];
         }
-      }
+      });
+      const feedResults = await Promise.all(feedPromises);
+      items = feedResults.flat();
     } else {
       console.log(`No direct feed for ${topicName}, falling back to Bing News RSS`);
       const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topicName)}&format=rss`;
@@ -80,16 +75,6 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
         if (!res.ok) throw new Error(`Status ${res.status}`);
         const text = await res.text();
         const feed = await parser.parseString(text);
-        console.log(`[${topicName}] Bing feed parsed. Items: ${feed.items?.length || 0}`);
-        
-        await firebase.createDocument('debug_logs', {
-          topic: topicName,
-          status: 'parsed_bing',
-          url: feedUrl,
-          count: feed.items?.length || 0,
-          timestamp: new Date().toISOString()
-        });
-
         items = feed.items.slice(0, 10);
       } catch (e: any) {
         console.error(`Error fetching Bing News for ${topicName}:`, e.message);
@@ -98,7 +83,7 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
 
     if (items.length === 0) return;
 
-    // Sort items by date ascending (oldest first)
+    // Sort items by date ascending
     items.sort((a, b) => {
       const timeA = new Date(a.pubDate || 0).getTime();
       const timeB = new Date(b.pubDate || 0).getTime();
@@ -106,74 +91,108 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
     });
 
     latestTimeInThisBatch = lastProcessedTime;
+    let processedCount = 0;
+    const MAX_ARTICLES_PER_RUN = 8;
 
+    // SEQUENTIAL PROCESSING to strictly stay within subrequest limits
     for (const article of items) {
       if (!article.link || !article.title) continue;
 
-      const articleTime = new Date(article.pubDate || 0).getTime();
+      const articleTime = new Date(article.pubDate).getTime() || Date.now();
+      if (articleTime > latestTimeInThisBatch) {
+        latestTimeInThisBatch = articleTime;
+      }
 
-      // SKIP if article is older than or equal to what we've already processed
+      // Skip old articles
       if (lastProcessedTime > 0 && articleTime <= lastProcessedTime) continue;
 
-      // Generate a simple ID from the URL safely via digest
+      // Limit processed articles
+      if (processedCount >= MAX_ARTICLES_PER_RUN) break;
+
       const encoder = new TextEncoder();
       const linkData = encoder.encode(article.link);
       const hashBuffer = await crypto.subtle.digest('SHA-256', linkData);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const articleId = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
-      
-      // Check if exists
-      const existing = await firebase.getDocument(`news/${articleId}`);
 
-      if (!existing) {
-        let source = "News";
-        let displayTitle = article.title;
-        let description = article.contentSnippet || article.description || article.content || "";
+      let source = "News";
+      let displayTitle = article.title;
+      let description = article.contentSnippet || article.description || article.content || "";
+      let imageUrl = null;
 
-        description = description.replace(/<[^>]*>?/gm, '').trim();
+      description = description.replace(/<[^>]*>?/gm, '').trim();
 
-        if (article.source && article.source.name) {
-          source = article.source.name;
-        } else {
-          const splitIndex = article.title.lastIndexOf(" - ");
-          if (splitIndex !== -1) {
-            source = article.title.substring(splitIndex + 3);
-            displayTitle = article.title.substring(0, splitIndex);
-          } else {
-            try {
-              const urlObj = new URL(article.link);
-              source = urlObj.hostname.replace('www.', '').split('.')[0];
-              source = source.charAt(0).toUpperCase() + source.slice(1);
-            } catch (e) { }
-          }
+      if (article.enclosure && article.enclosure.url) {
+        imageUrl = article.enclosure.url;
+      } else if (article.content) {
+        const imgMatch = article.content.match(/<img[^>]*src="([^"]*)"/i);
+        if (imgMatch && !imgMatch[1].includes('google.com') && !imgMatch[1].includes('gstatic.com')) {
+          imageUrl = imgMatch[1];
         }
+      }
 
-        console.log(`[${topicName}] New article: ${displayTitle}`);
+      if (article.source && article.source.name) {
+        source = article.source.name;
+      } else {
+        const splitIndex = article.title.lastIndexOf(" - ");
+        if (splitIndex !== -1) {
+          source = article.title.substring(splitIndex + 3);
+          displayTitle = article.title.substring(0, splitIndex);
+        } else {
+          try {
+            const urlObj = new URL(article.link);
+            source = urlObj.hostname.replace('www.', '').split('.')[0];
+            source = source.charAt(0).toUpperCase() + source.slice(1);
+          } catch (e) { }
+        }
+      }
 
+      try {
         await firebase.createDocument('news', {
           topic: topicName,
           title: displayTitle,
           description: description,
           url: article.link,
-          imageUrl: null, // Enrichment skipped for simplicity in first pass
+          imageUrl: imageUrl,
           time: article.pubDate || new Date().toISOString(),
           source: source,
           timestamp: new Date()
         }, articleId);
 
-        await sendNotification(firebase, topicName, displayTitle, null, {
+        processedCount++;
+        console.log(`[${topicName}] Added: ${displayTitle}`);
+
+        // Enrichment
+        try {
+          const articleData = await enrichArticle(article.link);
+          if (articleData.description || articleData.imageUrl) {
+            const updates: any = {};
+            if (articleData.description && articleData.description.length > description.length) {
+              updates.description = articleData.description;
+            }
+            if (articleData.imageUrl) {
+              updates.imageUrl = articleData.imageUrl;
+              imageUrl = articleData.imageUrl;
+            }
+            if (Object.keys(updates).length > 0) {
+              await firebase.patchDocument(`news/${articleId}`, updates);
+            }
+          }
+        } catch (e) { }
+
+        sendNotification(firebase, topicName, displayTitle, imageUrl, {
           id: articleId,
           url: article.link,
           source: source
         });
 
-        if (articleTime > latestTimeInThisBatch) {
-          latestTimeInThisBatch = articleTime;
-        }
+      } catch (e: any) {
+        if (e.message.includes('409') || e.message.includes('ALREADY_EXISTS')) continue;
+        console.error(`[${topicName}] Article error:`, e.message);
       }
     }
 
-    console.log(`[${topicName}] Processed successfully.`);
+    console.log(`[${topicName}] Done processing.`);
 
   } catch (error: any) {
     console.error(`Error in processTopic for ${topicName}:`, error.message);
@@ -202,7 +221,7 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
 }
 
 async function sendNotification(firebase: FirebaseLite, topic: string, title: string, imageUrl: string | null, metadata: any) {
-  const topicName = topic.replace(/\s+/g, "_");
+  const topicName = FirebaseLite.normalizeTopic(topic);
   const message: any = {
     topic: topicName,
     notification: {
@@ -226,5 +245,56 @@ async function sendNotification(firebase: FirebaseLite, topic: string, title: st
     console.log(`Notification sent for topic: ${topic}`);
   } catch (error) {
     console.error("Error sending notification:", error);
+  }
+}
+
+async function enrichArticle(url: string, timeoutMs: number = 8000): Promise<{description: string | null, imageUrl: string | null}> {
+  const fetchOptions = {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
+    // Cloudflare fetch doesn't support signal in the same way, but we can use Promise.race
+  };
+
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    
+    //@ts-ignore
+    const res = await fetch(url, { ...fetchOptions, signal: controller.signal });
+    clearTimeout(id);
+    
+    if (!res.ok) return { description: null, imageUrl: null };
+
+    let fullText = '';
+    let imageUrl: string | null = null;
+    
+    const rewriter = new HTMLRewriter()
+      .on('p', {
+        text(textChunk) {
+          fullText += textChunk.text;
+        }
+      })
+      .on('meta[property="og:image"]', {
+        element(el) {
+          imageUrl = el.getAttribute('content');
+        }
+      })
+      .on('meta[name="twitter:image"]', {
+        element(el) {
+          if (!imageUrl) imageUrl = el.getAttribute('content');
+        }
+      });
+    
+    await rewriter.transform(res).arrayBuffer();
+    
+    // Clean up text
+    const cleanedText = fullText.replace(/\s+/g, ' ').trim();
+    // Return first 1000 chars for safety
+    const description = cleanedText.length > 0 ? cleanedText.substring(0, 1000) : null;
+    
+    return { description, imageUrl };
+  } catch (e) {
+    return { description: null, imageUrl: null };
   }
 }

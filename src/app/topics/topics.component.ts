@@ -29,8 +29,9 @@ export class TopicsComponent  implements OnInit {
   async addTopic() {
     if (this.newTopic.trim()) {
       const topicName = this.newTopic.trim();
-      await this.newsService.addTopic(topicName);
+      // Subscribe FIRST to ensure we receive the notification from the first fetch
       await this.notificationService.subscribe(topicName);
+      await this.newsService.addTopic(topicName);
       this.newTopic = '';
     }
   }
