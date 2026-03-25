@@ -63,7 +63,7 @@ export default {
             if (url.pathname === '/topic/create' && request.method === 'POST') {
                 const { name, id } = await request.json() as any;
                 // Trigger immediate news search for new topic
-                ctx.waitUntil(processTopic(firebase, name, id));
+                ctx.waitUntil(processTopic(firebase, name, id, { subrequestCount: 0, maxSubrequests: 48 }));
                 return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
             }
 
@@ -107,15 +107,16 @@ export default {
                         });
 
                         if (response && Array.isArray(response)) {
+                            const deleteWrites: any[] = [];
                             for (const item of response) {
                                 if (item.document && item.document.name) {
-                                    const docPath = item.document.name.split('/documents/')[1];
-                                    if (docPath) {
-                                        await firebase.deleteDocument(docPath);
-                                    }
+                                    deleteWrites.push({ delete: item.document.name });
                                 }
                             }
-                            console.log(`[Trigger] Cleaned up news items for topic: ${name}`);
+                            if (deleteWrites.length > 0) {
+                                await firebase.commit(deleteWrites);
+                                console.log(`[Trigger] Cleaned up ${deleteWrites.length} news items for topic: ${name}`);
+                            }
                         }
                     } catch (e: any) {
                         console.error(`Error deleting news for topic ${name}:`, e.message);

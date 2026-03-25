@@ -117,11 +117,46 @@ export class FirebaseLite {
 
     if (!response.ok) {
         const error = await response.text();
-        console.error(`Firestore error on ${url}:`, error);
+        const urlObj = new URL(url);
+        console.error(`Firestore error on ${urlObj.pathname}:`, error);
         throw new Error(`Firestore error ${response.status}: ${error}`);
     }
 
-    return await response.json();
+    const data = await response.json();
+    return data;
+  }
+
+  async commit(writes: any[]): Promise<any> {
+    return await this.firestoreRequest(':commit', {
+      method: 'POST',
+      body: JSON.stringify({ writes })
+    });
+  }
+
+  // Helper to create a 'set' write for commit
+  createSetWrite(path: string, fields: any): any {
+    const projectId = this.serviceAccount.project_id;
+    return {
+      update: {
+        name: `projects/${projectId}/databases/(default)/documents/${path}`,
+        fields: this.encodeFirestoreFields(fields)
+      }
+    };
+  }
+
+  // Helper to create a 'patch' write for commit
+  createPatchWrite(path: string, fields: any, updateMaskKeys?: string[]): any {
+    const projectId = this.serviceAccount.project_id;
+    const keys = updateMaskKeys || Object.keys(fields);
+    return {
+      update: {
+        name: `projects/${projectId}/databases/(default)/documents/${path}`,
+        fields: this.encodeFirestoreFields(fields)
+      },
+      updateMask: {
+        fieldPaths: keys
+      }
+    };
   }
 
   // Simplified Firestore helpers
@@ -205,7 +240,7 @@ export class FirebaseLite {
     if (!response.ok) {
       const error = await response.text();
       console.error(`FCM Subscribe error:`, error);
-      throw new Error(`FCM Subscribe error ${response.status}: ${error}`);
+      return { success: false, error };
     }
 
     return await response.json();
@@ -232,7 +267,7 @@ export class FirebaseLite {
     if (!response.ok) {
       const error = await response.text();
       console.error(`FCM Unsubscribe error:`, error);
-      throw new Error(`FCM Unsubscribe error ${response.status}: ${error}`);
+      return { success: false, error };
     }
 
     return await response.json();
@@ -250,6 +285,12 @@ export class FirebaseLite {
       },
       body: JSON.stringify({ message }),
     });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`FCM Send error:`, error);
+      return { success: false, error };
+    }
 
     return await response.json();
   }

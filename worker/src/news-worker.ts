@@ -26,13 +26,24 @@ export async function processAllTopics(firebase: FirebaseLite) {
     return;
   }
 
+  // Cloudflare Workers Free plan has a 50 subrequest limit.
+  // We need to manage a global budget for this run.
+  const context = {
+    subrequestCount: 0,
+    maxSubrequests: 48 // Leave some room for other calls
+  };
+
   console.log(`Starting news search for ${topics.length} topics...`);
   for (const topic of topics) {
-    await processTopic(firebase, topic.name, topic.id, topic.lastProcessedTime);
+    if (context.subrequestCount >= context.maxSubrequests) {
+      console.warn("Stopping early: reached subrequest limit for this run.");
+      break;
+    }
+    await processTopic(firebase, topic.name, topic.id, context, topic.lastProcessedTime);
   }
 }
 
-export async function processTopic(firebase: FirebaseLite, topicName: string, topicId: string, lastProcessedTimeStr?: string) {
+export async function processTopic(firebase: FirebaseLite, topicName: string, topicId: string, context: {subrequestCount: number, maxSubrequests: number}, lastProcessedTimeStr?: string) {
   let lastProcessedTime = lastProcessedTimeStr ? new Date(lastProcessedTimeStr).getTime() : 0;
   let latestTimeInThisBatch = lastProcessedTime;
 
@@ -55,6 +66,7 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
       console.log(`Using direct publisher feeds for ${topicName}`);
       const feedPromises = TOPIC_FEEDS[normalizedTopicName].map(async (url) => {
         try {
+          context.subrequestCount++;
           const res = await fetch(url, fetchOptions);
           if (!res.ok) throw new Error(`Status ${res.status}`);
           const text = await res.text();
@@ -71,6 +83,7 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
       console.log(`No direct feed for ${topicName}, falling back to Bing News RSS`);
       const feedUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(topicName)}&format=rss`;
       try {
+        context.subrequestCount++;
         const res = await fetch(feedUrl, fetchOptions);
         if (!res.ok) throw new Error(`Status ${res.status}`);
         const text = await res.text();
@@ -91,10 +104,11 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
     });
 
     latestTimeInThisBatch = lastProcessedTime;
+    const writes: any[] = [];
+    const notificationArticles: any[] = [];
     let processedCount = 0;
-    const MAX_ARTICLES_PER_RUN = 8;
+    const MAX_ARTICLES_PER_RUN = 5;
 
-    // SEQUENTIAL PROCESSING to strictly stay within subrequest limits
     for (const article of items) {
       if (!article.link || !article.title) continue;
 
@@ -121,6 +135,7 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
       let imageUrl = null;
 
       description = description.replace(/<[^>]*>?/gm, '').trim();
+      if (description.includes("Intercepted transmission")) description = "";
 
       if (article.enclosure && article.enclosure.url) {
         imageUrl = article.enclosure.url;
@@ -147,76 +162,83 @@ export async function processTopic(firebase: FirebaseLite, topicName: string, to
         }
       }
 
-      try {
-        await firebase.createDocument('news', {
-          topic: topicName,
-          title: displayTitle,
-          description: description,
-          url: article.link,
-          imageUrl: imageUrl,
-          time: article.pubDate || new Date().toISOString(),
-          source: source,
-          timestamp: new Date()
-        }, articleId);
-
-        processedCount++;
-        console.log(`[${topicName}] Added: ${displayTitle}`);
-
-        // Enrichment
+      // Enrichment logic: Fetch high-quality content if budget allows
+      if (context.subrequestCount < context.maxSubrequests - 2) { // Reserve some for commit and notification
         try {
+          context.subrequestCount++;
+          console.log(`[${topicName}] Enriching: ${displayTitle}`);
           const articleData = await enrichArticle(article.link);
-          if (articleData.description || articleData.imageUrl) {
-            const updates: any = {};
-            if (articleData.description && articleData.description.length > description.length) {
-              updates.description = articleData.description;
-            }
-            if (articleData.imageUrl) {
-              updates.imageUrl = articleData.imageUrl;
-              imageUrl = articleData.imageUrl;
-            }
-            if (Object.keys(updates).length > 0) {
-              await firebase.patchDocument(`news/${articleId}`, updates);
-            }
+          if (articleData.description) {
+            description = articleData.description;
           }
-        } catch (e) { }
-
-        sendNotification(firebase, topicName, displayTitle, imageUrl, {
-          id: articleId,
-          url: article.link,
-          source: source
-        });
-
-      } catch (e: any) {
-        if (e.message.includes('409') || e.message.includes('ALREADY_EXISTS')) continue;
-        console.error(`[${topicName}] Article error:`, e.message);
+          if (articleData.imageUrl) {
+            imageUrl = articleData.imageUrl;
+          }
+        } catch (e: any) {
+          console.warn(`[${topicName}] Enrichment failed: ${e.message}`);
+        }
       }
+
+      const newsData = {
+        topic: topicName,
+        title: displayTitle,
+        description: description,
+        url: article.link,
+        imageUrl: imageUrl,
+        time: article.pubDate || new Date().toISOString(),
+        source: source,
+        timestamp: new Date()
+      };
+
+      writes.push(firebase.createSetWrite(`news/${articleId}`, newsData));
+      
+      notificationArticles.push({
+        id: articleId,
+        title: displayTitle,
+        imageUrl,
+        source,
+        url: article.link
+      });
+
+      processedCount++;
+    }
+
+    if (writes.length > 0) {
+      console.log(`[${topicName}] Committing ${writes.length} articles...`);
+      // Add topic status update to the same batch
+      const topicUpdate: any = { status: 'ready' };
+      if (latestTimeInThisBatch > lastProcessedTime) {
+        topicUpdate.lastProcessedTime = new Date(latestTimeInThisBatch).toISOString();
+      }
+      writes.push(firebase.createPatchWrite(`topics/${topicId}`, topicUpdate));
+      
+      context.subrequestCount++;
+      await firebase.commit(writes);
+      console.log(`[${topicName}] Batch commit successful.`);
+
+      // Send notifications (Individual as requested by user)
+      if (notificationArticles.length > 0) {
+        console.log(`[${topicName}] Sending ${notificationArticles.length} notifications...`);
+        for (const art of notificationArticles) {
+          if (context.subrequestCount >= context.maxSubrequests) break;
+          context.subrequestCount++;
+          await sendNotification(firebase, topicName, art.title, art.imageUrl, {
+            id: art.id,
+            url: art.url,
+            source: art.source
+          });
+        }
+      }
+    } else {
+      context.subrequestCount++;
+      // Still update topic status if no new articles
+      await firebase.patchDocument(`topics/${topicId}`, { status: 'ready' });
     }
 
     console.log(`[${topicName}] Done processing.`);
 
   } catch (error: any) {
     console.error(`Error in processTopic for ${topicName}:`, error.message);
-  } finally {
-    // Unconditionally mark as ready to avoid infinite UI loader on crashes
-    try {
-      const updateData: any = { status: 'ready' };
-      if (latestTimeInThisBatch > lastProcessedTime) {
-        updateData.lastProcessedTime = new Date(latestTimeInThisBatch).toISOString();
-      }
-
-      // Retry up to 3 times to account for Firestore write propagation lag
-      for (let i = 0; i < 3; i++) {
-        const res = await firebase.patchDocument(`topics/${topicId}`, updateData);
-        if (res !== null) {
-          console.log(`[${topicName}] Topic status updated to ready.`);
-          break;
-        }
-        console.warn(`[${topicName}] Retry updating status (${i + 1}/3)...`);
-        await new Promise(r => setTimeout(r, 1500));
-      }
-    } catch (e: any) {
-      console.error(`Failed to mark topic ${topicName} as ready in finally:`, e.message);
-    }
   }
 }
 
@@ -253,7 +275,6 @@ async function enrichArticle(url: string, timeoutMs: number = 8000): Promise<{de
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
-    // Cloudflare fetch doesn't support signal in the same way, but we can use Promise.race
   };
 
   try {
@@ -266,13 +287,17 @@ async function enrichArticle(url: string, timeoutMs: number = 8000): Promise<{de
     
     if (!res.ok) return { description: null, imageUrl: null };
 
-    let fullText = '';
+    let ogDescription = '';
+    let bodyText = '';
     let imageUrl: string | null = null;
+
+    const hostname = new URL(url).hostname.toLowerCase();
     
     const rewriter = new HTMLRewriter()
-      .on('p', {
-        text(textChunk) {
-          fullText += textChunk.text;
+      // Prioritize OG description for high-quality summary (as lead-in)
+      .on('meta[property="og:description"]', {
+        element(el) {
+          ogDescription = el.getAttribute('content') || '';
         }
       })
       .on('meta[property="og:image"]', {
@@ -280,20 +305,62 @@ async function enrichArticle(url: string, timeoutMs: number = 8000): Promise<{de
           imageUrl = el.getAttribute('content');
         }
       })
-      .on('meta[name="twitter:image"]', {
-        element(el) {
-          if (!imageUrl) imageUrl = el.getAttribute('content');
+      // Target ACTUAL article body containers exclusively for major sites
+      // The Hindu: div.articlebody-container or div[id^="content-body-"]
+      // TOI: div.main-content, div._3YYi3, .v_container
+      // Al Jazeera: div.wysiwyg
+      .on('div[id^="content-body-"] p, .articlebody-container p, .article-body-container p, div.main-content p, div._3YYi3 p, div.wysiwyg p, div.article-content p, div.content_text p, .article__content p, .story-details p', {
+        text(textChunk) {
+          if (bodyText.length < 2500) {
+            const t = textChunk.text;
+            // Filter out common marketing/newsletter blurbs
+            const garbagePhrases = [
+              "Looking at World Affairs",
+              "News and reviews from the world of cinema",
+              "Your download of the top 5",
+              "weekly newsletter from science",
+              "Ramya Kannan writes to you",
+              "subscribe to the newsletter",
+              "Support quality journalism",
+              "strictly for subscribers"
+            ];
+            
+            if (garbagePhrases.some(phrase => t.includes(phrase))) {
+              return; // Skip this chunk
+            }
+            
+            bodyText += t;
+          }
+        }
+      })
+      // General fallback only if bodyText is still empty
+      .on('p', {
+        text(textChunk) {
+          if (bodyText.length === 0) {
+            const t = textChunk.text.trim();
+            if (t.length > 50 && !t.includes('cookie') && !t.includes('copyright') && !t.includes('Newsletter')) {
+              bodyText += textChunk.text;
+            }
+          }
         }
       });
     
     await rewriter.transform(res).arrayBuffer();
     
     // Clean up text
-    const cleanedText = fullText.replace(/\s+/g, ' ').trim();
-    // Return first 1000 chars for safety
-    const description = cleanedText.length > 0 ? cleanedText.substring(0, 1000) : null;
+    const cleanedBody = bodyText.replace(/\s+/g, ' ').trim();
     
-    return { description, imageUrl };
+    // Choose the best content
+    let finalDescription = null;
+    if (cleanedBody.length > 150) {
+      finalDescription = cleanedBody.substring(0, 2000);
+    } else if (ogDescription && ogDescription.length > 50) {
+      finalDescription = ogDescription;
+    } else if (cleanedBody.length > 0) {
+      finalDescription = cleanedBody;
+    }
+    
+    return { description: finalDescription, imageUrl };
   } catch (e) {
     return { description: null, imageUrl: null };
   }

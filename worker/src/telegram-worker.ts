@@ -45,11 +45,12 @@ export async function pollTelegram(firebase: FirebaseLite, botToken: string) {
         }
       }
 
-      if (matches.length > 0) {
-        await sendTelegramNotifications(firebase, channel.username, matches);
-        await firebase.patchDocument(`telegramChannels/${channel.id}`, { lastMessageId: maxId });
-      }
-    } catch (err) {
+       if (matches.length > 0) {
+         await sendTelegramNotifications(firebase, channel.username, matches);
+       }
+       // Update lastMessageId regardless of matches to progress
+       await firebase.patchDocument(`telegramChannels/${channel.id}`, { lastMessageId: maxId });
+     } catch (err) {
       console.error(`Error polling telegram for ${channel.username}:`, err);
     }
   }
@@ -61,15 +62,19 @@ async function sendTelegramNotifications(firebase: FirebaseLite, channel: string
 
     if (tokens.length === 0) return;
 
+    // Restore individual notifications for each match
     for (const match of matches) {
         const body = match.text.length > 180 ? match.text.substring(0, 177) + "..." : match.text;
-        
-        // send to each token (simple version, could optimize with multicast if needed)
-        for (const token of tokens) {
+        const title = `🔔 Keyword match: "${match.keyword}"`;
+
+        // Limit to first 5 tokens to handle subrequest limits better
+        const limitedTokens = tokens.slice(0, 5);
+
+        for (const token of limitedTokens) {
             const message = {
                 token: token,
                 notification: {
-                    title: `🔔 Keyword match: "${match.keyword}"`,
+                    title: title,
                     body: body,
                 },
                 data: {
