@@ -27,10 +27,12 @@ export class AppComponent implements OnInit {
   private setupBackButton() {
     App.addListener('backButton', ({ canGoBack }) => {
       const currentUrl = this.router.url;
-      if (currentUrl === '/home' || currentUrl === '/') {
+      // The home page is actually /tabs/news based on AppRoutingModule
+      if (currentUrl === '/tabs/news' || currentUrl === '/tabs/telegram' || currentUrl === '/') {
         App.exitApp();
       } else {
-        this.router.navigate(['/home']);
+        // If not on a root tab, go back or to home
+        window.history.back();
       }
     });
   }
