@@ -26,6 +26,17 @@ export async function processAllTopics(firebase: FirebaseLite) {
     return;
   }
 
+  // Fetch global config for minFetchTime (to ensure new topics respect global deletions)
+  let minFetchTime = 0;
+  try {
+    const globalConfig = await firebase.getDocument('config/global');
+    if (globalConfig && globalConfig.minFetchTime) {
+      minFetchTime = new Date(globalConfig.minFetchTime).getTime();
+    }
+  } catch (e) {
+    console.warn("Could not fetch global config, continuing with 0 minFetchTime.");
+  }
+
   // Cloudflare Workers Free plan has a 50 subrequest limit.
   // We need to manage a global budget for this run.
   const context = {
@@ -33,18 +44,22 @@ export async function processAllTopics(firebase: FirebaseLite) {
     maxSubrequests: 48 // Leave some room for other calls
   };
 
-  console.log(`Starting news search for ${topics.length} topics...`);
+  console.log(`Starting news search for ${topics.length} topics... (Min Fetch: ${minFetchTime > 0 ? new Date(minFetchTime).toISOString() : 'None'})`);
   for (const topic of topics) {
     if (context.subrequestCount >= context.maxSubrequests) {
       console.warn("Stopping early: reached subrequest limit for this run.");
       break;
     }
-    await processTopic(firebase, topic.name, topic.id, context, topic.lastProcessedTime);
+    await processTopic(firebase, topic.name, topic.id, context, topic.lastProcessedTime, minFetchTime);
   }
 }
 
-export async function processTopic(firebase: FirebaseLite, topicName: string, topicId: string, context: {subrequestCount: number, maxSubrequests: number}, lastProcessedTimeStr?: string) {
+export async function processTopic(firebase: FirebaseLite, topicName: string, topicId: string, context: {subrequestCount: number, maxSubrequests: number}, lastProcessedTimeStr?: string, minFetchTimeMs: number = 0) {
   let lastProcessedTime = lastProcessedTimeStr ? new Date(lastProcessedTimeStr).getTime() : 0;
+  
+  // Respect global deletion time
+  lastProcessedTime = Math.max(lastProcessedTime, minFetchTimeMs);
+  
   let latestTimeInThisBatch = lastProcessedTime;
 
   try {

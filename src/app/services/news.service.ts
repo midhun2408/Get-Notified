@@ -94,5 +94,18 @@ export class NewsService {
       }))
     );
   }
+  
+  async deleteAllNews() {
+    try {
+      const response = await fetch('https://worker.get-notified-api.workers.dev/news/delete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      return await response.json();
+    } catch (e) {
+      console.error('Failed to trigger global news deletion:', e);
+      throw e;
+    }
+  }
 
 }

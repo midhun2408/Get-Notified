@@ -164,6 +164,61 @@ export default {
                 return new Response(JSON.stringify({ success: true, message: 'Migration triggered.' }), { headers: corsHeaders });
             }
 
+            if (url.pathname === '/news/delete-all' && request.method === 'POST') {
+                ctx.waitUntil((async () => {
+                    try {
+                        const now = new Date().toISOString();
+                        
+                        // 1. Delete all news articles
+                        const queryBody = {
+                            structuredQuery: {
+                                from: [{ collectionId: 'news' }]
+                            }
+                        };
+                        const response = await firebase.firestoreRequest(':runQuery', {
+                            method: 'POST',
+                            body: JSON.stringify(queryBody)
+                        });
+
+                        if (response && Array.isArray(response)) {
+                            const deleteWrites: any[] = [];
+                            for (const item of response) {
+                                if (item.document && item.document.name) {
+                                    deleteWrites.push({ delete: item.document.name });
+                                }
+                            }
+                            // Firestore batch limit is 500. For now, we assume it's within limits or we'll need chunking.
+                            if (deleteWrites.length > 0) {
+                                // Chunk into 400s to be safe
+                                for (let i = 0; i < deleteWrites.length; i += 400) {
+                                    await firebase.commit(deleteWrites.slice(i, i + 400));
+                                }
+                                console.log(`[Admin] Deleted ${deleteWrites.length} news items.`);
+                            }
+                        }
+
+                        // 2. Update global minFetchTime (using commit/set for idempotency)
+                        await firebase.commit([
+                            firebase.createSetWrite('config/global', { minFetchTime: now })
+                        ]);
+
+                        // 3. Update all topics to sync with this deletion time
+                        const topics = await firebase.listDocuments('topics');
+                        const topicWrites = topics.map(t => firebase.createPatchWrite(`topics/${t.id}`, { lastProcessedTime: now }));
+                        if (topicWrites.length > 0) {
+                            for (let i = 0; i < topicWrites.length; i += 400) {
+                                await firebase.commit(topicWrites.slice(i, i + 400));
+                            }
+                        }
+                        
+                        console.log(`[Admin] Global deletion complete at ${now}.`);
+                    } catch (e: any) {
+                        console.error(`Error in global news deletion:`, e.message);
+                    }
+                })());
+                return new Response(JSON.stringify({ success: true, message: 'Global deletion triggered.' }), { headers: corsHeaders });
+            }
+
             return new Response('Not Found', { status: 404, headers: corsHeaders });
         } catch (error: any) {
             return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });

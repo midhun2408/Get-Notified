@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { NewsService, NewsItem } from '../services/news.service';
 import { ThemeService } from '../services/theme.service';
+import { AlertController, ToastController } from '@ionic/angular';
 
 @Component({
   selector: 'app-home',
@@ -18,7 +19,9 @@ export class HomeComponent  implements OnInit {
   constructor(
     private newsService: NewsService, 
     private router: Router,
-    public themeService: ThemeService
+    public themeService: ThemeService,
+    private alertController: AlertController,
+    private toastController: ToastController
   ) { }
 
   ngOnInit() {
@@ -150,5 +153,53 @@ export class HomeComponent  implements OnInit {
 
   goToDetail(id: string) {
     this.router.navigate(['/news-detail', id]);
+  }
+
+  async deleteAllNews() {
+    const alert = await this.alertController.create({
+      header: 'Confirm Deletion',
+      message: 'Are you sure you want to delete all news articles? This will clear your feed and only new articles from this point forward will be fetched.',
+      buttons: [
+        {
+          text: 'Cancel',
+          role: 'cancel',
+          cssClass: 'secondary'
+        },
+        {
+          text: 'Delete',
+          handler: async () => {
+            this.isLoading = true;
+            try {
+              await this.newsService.deleteAllNews();
+              this.news = []; // Clear current UI list immediately
+              
+              const toast = await this.toastController.create({
+                message: 'All news articles deleted successfully.',
+                duration: 2000,
+                color: 'success',
+                position: 'bottom'
+              });
+              await toast.present();
+              
+              // Force refresh to ensure topics are ready (status 'ready')
+              this.refreshNews(false);
+            } catch (error) {
+              console.error('[Home] Error deleting all news:', error);
+              const toast = await this.toastController.create({
+                message: 'Failed to delete news. Please try again.',
+                duration: 2000,
+                color: 'danger',
+                position: 'bottom'
+              });
+              await toast.present();
+            } finally {
+              this.isLoading = false;
+            }
+          }
+        }
+      ]
+    });
+
+    await alert.present();
   }
 }
